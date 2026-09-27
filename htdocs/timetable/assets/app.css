@@ -20,6 +20,7 @@
   }
 }
 * { box-sizing:border-box; }
+[hidden] { display:none !important; } /* ให้ attribute hidden ชนะ display ของคลาส เช่น .field { display:grid } */
 html, body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--body); font-size:15px; line-height:1.6; }
 a { color:var(--blue); }
 h1, h2, h3 { font-family:var(--display); line-height:1.25; margin:0; text-wrap:balance; }
