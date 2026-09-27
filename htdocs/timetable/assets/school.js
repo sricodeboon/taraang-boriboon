@@ -5,7 +5,7 @@ import { attachGeo } from './geo.js';
 
 const LOGO_SIDE = 256;          // ย่อด้านยาวสุดเหลือเท่านี้
 const LOGO_MAX_CHARS = 266_000; // ≈ 200KB หลังถอด base64 (ตรงกับ LOGO_MAX_BYTES ฝั่ง PHP)
-let pending = null;             // data URL ที่เลือกแล้วแต่ยังไม่กดบันทึก
+let saving = false;             // กำลังส่งโลโก้ (เลือกรูปแล้วบันทึกทันที ไม่มีขั้นกดบันทึกแยก เดิมผู้ใช้เลือกรูปแล้วออกไปก่อนกดบันทึก รูปจึงหาย)
 
 async function post(r, body) {
   const res = await fetch('api.php?' + new URLSearchParams({ r }), {
@@ -23,7 +23,7 @@ export const logoUrl = () => (window.TT.school.logoRev ? 'logo.php?v=' + window.
 export function render(el) {
   const s = window.TT.school, owner = window.TT.owner;
   const ro = owner ? '' : 'disabled';
-  const shown = pending || logoUrl();
+  const shown = logoUrl();
   el.innerHTML = `<div class="data-head"><div><h3 style="font-size:1.05rem">ข้อมูลโรงเรียน</h3>
       <p>${owner ? 'ชื่อและโลโก้จะแสดงที่หัวแอป หัวตาราง PDF และทุกชีตใน Excel' : 'เฉพาะเจ้าของโรงเรียน (ผู้ลงทะเบียน) แก้ไขส่วนนี้ได้'}</p></div></div>
     <div class="school-form">
@@ -32,9 +32,9 @@ export function render(el) {
           <div class="logo-box">${shown ? `<img src="${esc(shown)}" alt="โลโก้โรงเรียน">` : '<span class="hint">ยังไม่มี</span>'}</div>
           ${owner ? `<div style="display:grid;gap:6px">
             <div class="logo-actions">
-              <label class="btn btn-sm">เลือกรูป…<input type="file" id="logo-file" accept="image/png,image/jpeg,image/webp" hidden></label>
-              ${pending ? '<button class="btn btn-sm btn-primary" id="logo-save">บันทึกโลโก้</button><button class="btn btn-sm" id="logo-cancel">ยกเลิก</button>' : ''}
-              ${!pending && s.logoRev ? '<button class="btn btn-sm btn-danger" id="logo-del">ลบโลโก้</button>' : ''}
+              <label class="btn btn-sm">${s.logoRev ? 'เปลี่ยนรูป…' : 'เลือกรูป…'}<input type="file" id="logo-file" accept="image/png,image/jpeg,image/webp" hidden></label>
+              ${s.logoRev && !saving ? '<button class="btn btn-sm btn-danger" id="logo-del">ลบโลโก้</button>' : ''}
+              ${saving ? '<span class="hint" role="status">กำลังบันทึกโลโก้…</span>' : ''}
             </div>
             <span class="hint">PNG หรือ JPG · พื้นหลังโปร่งใสจะดูดีที่สุด · ระบบย่อรูปให้เหลือ ${LOGO_SIDE}×${LOGO_SIDE} อัตโนมัติ</span>
           </div>` : ''}
@@ -84,23 +84,23 @@ export function render(el) {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (!f) return;
-    try { pending = await shrink(f); render(el); }
-    catch (err) { toast(err.message); }
+    let url;
+    try { url = await shrink(f); } catch (err) { toast(err.message); return; }
+    saveLogo(el, url);
   });
-  $('logo-cancel')?.addEventListener('click', () => { pending = null; render(el); });
-  $('logo-save')?.addEventListener('click', () => saveLogo(el, pending));
   $('logo-del')?.addEventListener('click', () => { if (confirm('ลบโลโก้โรงเรียน ยืนยันไหม')) saveLogo(el, null); });
 }
 
 async function saveLogo(el, logo) {
+  if (saving) return;
+  saving = true; render(el);
   try {
     const r = await post('school.logo', { logo });
     window.TT.school.logoRev = r.logoRev;
-    pending = null;
     applyHeader();
     toast(logo ? 'บันทึกโลโก้แล้ว' : 'ลบโลโก้แล้ว');
-    render(el);
-  } catch (err) { toast(err.message); }
+  } catch (err) { toast('บันทึกโลโก้ไม่สำเร็จ: ' + err.message, 6000); }
+  finally { saving = false; render(el); }
 }
 
 /** อัปเดตชื่อ/โลโก้ที่หัวแอปทันทีโดยไม่ต้องรีโหลด */
