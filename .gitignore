@@ -14,3 +14,6 @@ htdocs/_dpatest/
 
 # DPA พร้อมส่ง มี repo แยก: github.com/sricodeboon/dpa-phrom-song (โฟลเดอร์นี้เป็น git repo ของตัวเอง)
 htdocs/dpa/
+
+# ระบบกีฬาสี ช้างเผือกเกมส์ มี repo แยก: github.com/sricodeboon/kilasi (โฟลเดอร์นี้เป็น git repo ของตัวเอง)
+htdocs/kilasi/

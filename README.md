@@ -4,7 +4,9 @@
 
 **ใช้งานจริง:** https://sricodeboon.infinityfreeapp.com/timetable/ · [คู่มือการใช้งาน](https://sricodeboon.infinityfreeapp.com/timetable/guide.php)
 
-เครื่องมืออื่นในเว็บเดียวกัน: **[DPA พร้อมส่ง](https://github.com/sricodeboon/dpa-phrom-song)** ย่อไฟล์วิดีโอการสอนและรวม PDF สำหรับยื่นประเมินวิทยฐานะ (โฟลเดอร์ `htdocs/dpa/` แยกเป็น repo ของตัวเอง)
+เครื่องมืออื่นในเว็บเดียวกัน:
+- **[DPA พร้อมส่ง](https://github.com/sricodeboon/dpa-phrom-song)** ย่อไฟล์วิดีโอการสอนและรวม PDF สำหรับยื่นประเมินวิทยฐานะ (โฟลเดอร์ `htdocs/dpa/` แยกเป็น repo ของตัวเอง)
+- **[ช้างเผือกเกมส์ · ระบบกีฬาสีภายใน](https://github.com/sricodeboon/kilasi)** แบ่งสีอัตโนมัติ ครูหลายท่านบันทึกผลพร้อมกัน จอฉายคะแนนสดในวันงาน (โฟลเดอร์ `htdocs/kilasi/` แยกเป็น repo ของตัวเอง)
 
 ## ความสามารถ
 
