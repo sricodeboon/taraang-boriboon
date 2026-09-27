@@ -8,7 +8,7 @@ $u = current_user();
 if (!$u) redirect('index.php');
 if ($u['school_id']) redirect('app.php');
 
-$error = null;
+$error = flash(); // เช่น แจ้งหมดเวลาจาก csrf_check() แล้วให้กดใหม่
 $v = ['name' => '', 'code' => '', 'tambon' => '', 'amphoe' => '', 'province' => '', 'template' => 'sample', 'band' => 'primary'];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();

@@ -52,6 +52,6 @@ page_head('จัดตาราง · ' . $school['name'], '<style>' . file_get
   </main>
   <div id="toast" class="toast" role="status" hidden></div>
 </div>
-<script>window.TT = { csrf: <?= json_encode(csrf_token()) ?>, school: <?= $js(school_public($school)) ?>, owner: <?= is_owner($user) ? 'true' : 'false' ?>, boot: <?= $js(['terms' => $bootTerms, 'term' => $bootTerm]) ?> };</script>
+<script>window.TT = { csrf: <?= json_encode(csrf_token()) ?>, school: <?= $js(school_public($school)) ?>, owner: <?= is_owner($user) ? 'true' : 'false' ?>, flash: <?= $js(flash()) ?>, boot: <?= $js(['terms' => $bootTerms, 'term' => $bootTerm]) ?> };</script>
 <script type="module" src="assets/app.js?v=<?= $v('assets/app.js') ?>"></script>
 <?php page_foot();

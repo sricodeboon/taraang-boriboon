@@ -14,7 +14,7 @@ let saveTimer = null, saving = false, dirty = false;
 const $ = (s) => document.querySelector(s);
 const saveState = (text, cls = '') => { const el = $('#save-state'); el.textContent = text; el.className = 'pill ' + cls; };
 
-async function api(r, body, query = {}) {
+async function api(r, body, query = {}, retried = false) {
   const qs = new URLSearchParams({ r, ...query });
   const res = await fetch('api.php?' + qs, {
     method: body ? 'POST' : 'GET',
@@ -24,8 +24,15 @@ async function api(r, body, query = {}) {
   });
   let j = null;
   try { j = await res.json(); } catch { /* ไม่ใช่ JSON */ }
+  // token เปลี่ยน (ออก/เข้าระบบจากแท็บอื่น) แต่ยังอยู่ในระบบ → ขอ token ใหม่แล้วลองซ้ำครั้งเดียว
+  if (res.status === 419 && body && !retried) { await refreshCsrf(); return api(r, body, query, true); }
   if (!res.ok) { const err = new Error(j?.error || `เกิดข้อผิดพลาด (${res.status})`); err.status = res.status; err.body = j; throw err; }
   return j;
+}
+
+export async function refreshCsrf() {
+  const me = await api('me');
+  window.TT.csrf = me.csrf;
 }
 
 function renderTab() {
@@ -93,7 +100,8 @@ async function save() {
         dirty = false; await loadTerm(store.termId);
       } else { store.version = e.body.version; saveTimer = setTimeout(save, 100); }
     } else if (e.status === 401 || e.status === 403) {
-      saveState('หมดเวลาเข้าสู่ระบบ', 'warn'); toast('กรุณาเข้าสู่ระบบใหม่');
+      saveState('หมดเวลาเข้าสู่ระบบ', 'warn');
+      toast('หมดเวลาเข้าสู่ระบบ การแก้ไขล่าสุดยังไม่ถูกบันทึก กรุณาเข้าสู่ระบบใหม่', 8000);
     } else {
       saveState('บันทึกไม่สำเร็จ', 'warn'); toast(e.message + ' จะลองใหม่อัตโนมัติ');
       saveTimer = setTimeout(save, 5000);
@@ -154,6 +162,7 @@ $('#term-select').addEventListener('change', async (e) => {
   await loadTerm(+e.target.value);
 });
 
+if (window.TT.flash) toast(window.TT.flash, 6000);
 refreshTerms().catch((e) => { saveState('โหลดไม่สำเร็จ', 'warn'); toast(e.message); });
 
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }

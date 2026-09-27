@@ -66,15 +66,30 @@ function csrf_token(): string {
     return $_SESSION['csrf'];
 }
 
-function csrf_check(): void {
+function csrf_valid(): bool {
     $sent = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($_POST['csrf'] ?? '');
-    if (!is_string($sent) || !hash_equals(csrf_token(), $sent)) {
-        if (str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'json') || isset($_SERVER['HTTP_X_CSRF_TOKEN'])) {
-            json_out(['error' => 'หมดเวลาการใช้งาน กรุณารีเฟรชหน้าแล้วลองอีกครั้ง'], 419);
-        }
-        http_response_code(419);
-        exit('หมดเวลาการใช้งาน กรุณากลับไปรีเฟรชหน้าแล้วลองอีกครั้ง');
+    return is_string($sent) && $sent !== '' && hash_equals(csrf_token(), $sent);
+}
+
+function csrf_check(): void {
+    if (csrf_valid()) return;
+    if (str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'json') || isset($_SERVER['HTTP_X_CSRF_TOKEN'])) {
+        json_out(['error' => 'หมดเวลาการใช้งาน กรุณารีเฟรชหน้าแล้วลองอีกครั้ง', 'csrf' => true], 419);
     }
+    // ฟอร์มปกติ: หน้าเปิดค้างไว้นานจน session หมดอายุ (หรือออก/เข้าระบบจากแท็บอื่น) → กลับไปหน้าเดิมที่มี token ใหม่ แทนหน้าข้อความตัน
+    flash('หน้านี้เปิดค้างไว้นานจนหมดเวลา กรุณากดอีกครั้ง');
+    redirect(back_path());
+}
+
+/** หน้าก่อนหน้าในเว็บเดียวกันเท่านั้น (กัน open redirect) · ไม่มี/ต่างโดเมน → หน้าแรกของระบบ */
+function back_path(): string {
+    $ref = (string) ($_SERVER['HTTP_REFERER'] ?? '');
+    $base = parse_url(base_url(), PHP_URL_PATH) ?: '/';
+    $u = parse_url($ref);
+    $host = ($u['host'] ?? '') . (isset($u['port']) ? ':' . $u['port'] : '');
+    if (!$u || $host !== ($_SERVER['HTTP_HOST'] ?? '') || !str_starts_with($u['path'] ?? '', rtrim($base, '/') . '/')) return 'index.php';
+    $rel = ltrim(substr($u['path'], strlen(rtrim($base, '/'))), '/');
+    return preg_match('#^[a-z]+\.php$#', $rel) ? $rel : 'index.php';
 }
 
 function flash(?string $msg = null): ?string {

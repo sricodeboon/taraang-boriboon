@@ -7,13 +7,19 @@ const LOGO_SIDE = 256;          // ย่อด้านยาวสุดเห
 const LOGO_MAX_CHARS = 266_000; // ≈ 200KB หลังถอด base64 (ตรงกับ LOGO_MAX_BYTES ฝั่ง PHP)
 let saving = false;             // กำลังส่งโลโก้ (เลือกรูปแล้วบันทึกทันที ไม่มีขั้นกดบันทึกแยก เดิมผู้ใช้เลือกรูปแล้วออกไปก่อนกดบันทึก รูปจึงหาย)
 
-async function post(r, body) {
+async function post(r, body, retried = false) {
   const res = await fetch('api.php?' + new URLSearchParams({ r }), {
     method: 'POST', credentials: 'same-origin', body: JSON.stringify(body),
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.TT.csrf, Accept: 'application/json' },
   });
   let j = null;
   try { j = await res.json(); } catch { /* ไม่ใช่ JSON */ }
+  if (res.status === 419 && !retried) {
+    // token เปลี่ยนจากแท็บอื่น → ขอใหม่แล้วลองซ้ำครั้งเดียว
+    const me = await (await fetch('api.php?r=me', { credentials: 'same-origin', headers: { Accept: 'application/json' } })).json().catch(() => null);
+    if (me?.csrf) { window.TT.csrf = me.csrf; return post(r, body, true); }
+  }
+  if (res.status === 401) throw new Error('หมดเวลาเข้าสู่ระบบ กรุณารีเฟรชหน้าแล้วเข้าสู่ระบบใหม่');
   if (!res.ok) throw new Error(j?.error || `เกิดข้อผิดพลาด (${res.status})`);
   return j;
 }
