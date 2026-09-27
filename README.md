@@ -4,6 +4,8 @@
 
 **ใช้งานจริง:** https://sricodeboon.infinityfreeapp.com/timetable/ · [คู่มือการใช้งาน](https://sricodeboon.infinityfreeapp.com/timetable/guide.php)
 
+เครื่องมืออื่นในเว็บเดียวกัน: **[DPA พร้อมส่ง](https://github.com/sricodeboon/dpa-phrom-song)** ย่อไฟล์วิดีโอการสอนและรวม PDF สำหรับยื่นประเมินวิทยฐานะ (โฟลเดอร์ `htdocs/dpa/` แยกเป็น repo ของตัวเอง)
+
 ## ความสามารถ
 
 - เข้าสู่ระบบด้วย Google หรือ LINE แต่ละโรงเรียนเห็นและแก้ได้เฉพาะข้อมูลของตัวเอง

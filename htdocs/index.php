@@ -162,6 +162,11 @@ $assetVersion = (string) @filemtime(__DIR__ . '/assets/mind.js');
             <b>ตารางบริบูรณ์</b>
             <span>ระบบจัดตารางเรียนตารางสอนออนไลน์ ลากวาง ตรวจคาบชน จัดอัตโนมัติ ส่งออก Excel และ PDF ลองใช้ได้ทันทีโดยไม่ต้องสมัคร</span>
           </a></li>
+          <li><a class="work-card" href="dpa/">
+            <span class="work-top"><img src="dpa/icon-192.png" alt="" width="44" height="44"><i>/dpa</i></span>
+            <b>DPA พร้อมส่ง</b>
+            <span>ย่อวิดีโอการสอนหลาย GB ให้เหลือ 500 MB แปลง MOV จาก iPhone เป็น MP4 ตัดให้ไม่เกิน 60 นาที รวม PDF ทำในเครื่องครูเอง ฟรี ไม่ต้องลงโปรแกรม</span>
+          </a></li>
         </ul>
       </div>
       <div class="promise">

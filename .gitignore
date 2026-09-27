@@ -8,3 +8,9 @@ htdocs/timetable/storage/*.sqlite*
 # บันทึกส่งต่องานภายใน (มีอีเมล/เลขบัญชีโฮสต์) และไฟล์ zip สำหรับอัปโหลด — ไม่เผยแพร่
 HANDOFF.md
 *.zip
+
+# ไฟล์วิดีโอทดสอบเครื่องมือ DPA (ชั่วคราว)
+htdocs/_dpatest/
+
+# DPA พร้อมส่ง มี repo แยก: github.com/sricodeboon/dpa-phrom-song (โฟลเดอร์นี้เป็น git repo ของตัวเอง)
+htdocs/dpa/

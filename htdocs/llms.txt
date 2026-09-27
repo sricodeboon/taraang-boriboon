@@ -15,3 +15,9 @@
 - [ตารางบริบูรณ์](https://sricodeboon.infinityfreeapp.com/timetable/): เข้าสู่ระบบด้วย Google/LINE หรือลองใช้ทันทีโดยไม่ต้องสมัคร
 - [คู่มือการใช้งาน](https://sricodeboon.infinityfreeapp.com/timetable/guide.php): โครงคาบ คาบล็อก ข้อมูลครู/วิชา การสอน ลากวาง จัดอัตโนมัติ ส่งออก Excel/PDF
 - [นโยบายความเป็นส่วนตัว](https://sricodeboon.infinityfreeapp.com/timetable/privacy.php): ข้อมูลที่เก็บและสิทธิ์ตาม PDPA
+
+## ผลงาน: DPA พร้อมส่ง
+
+เครื่องมือฟรีสำหรับครูที่ยื่นประเมินวิทยฐานะผ่านระบบ DPA ทำงานในเบราว์เซอร์ ไม่อัปโหลดไฟล์
+
+- [DPA พร้อมส่ง](https://sricodeboon.infinityfreeapp.com/dpa/): ย่อวิดีโอการสอนให้ไม่เกิน 300 MB–1 GB, แปลง MOV/HEVC เป็น MP4 H.264, ตัดให้ไม่เกิน 60/10 นาที, รวม PDF และรูปผลงานนักเรียน, เช็กลิสต์ไฟล์ก่อนส่ง
