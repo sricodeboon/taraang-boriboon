@@ -1,0 +1,5 @@
+# กันไฟล์ที่ไม่ควรเปิดผ่านเว็บ
+<FilesMatch "^(config\.php|config\.sample\.php|SPEC\.md|.*\.sqlite.*)$">
+    Require all denied
+</FilesMatch>
+Options -Indexes

@@ -1,0 +1,23 @@
+# กันไม่ให้เปิดไฟล์ตั้งค่าและไฟล์ซ่อนผ่านเว็บ
+<FilesMatch "^(config\.php|config\.sample\.php|\..*)$">
+    Require all denied
+</FilesMatch>
+
+Options -Indexes
+
+# หน้าไม่พบ: ตอบ 404 จริง (ไม่ redirect ไปหน้า error ของโฮสต์) — สำคัญต่อ SEO และ Lighthouse
+ErrorDocument 404 /404.html
+
+# บีบอัดและแคชไฟล์คงที่ (ครอบ IfModule ไว้ ถ้าโฮสต์ไม่มีโมดูลก็ไม่พัง)
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css text/javascript application/javascript application/json image/svg+xml text/plain application/xml
+</IfModule>
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType font/woff2 "access plus 1 year"
+    ExpiresByType image/svg+xml "access plus 1 month"
+    ExpiresByType image/png "access plus 1 month"
+    ExpiresByType text/css "access plus 1 week"
+    ExpiresByType text/javascript "access plus 1 week"
+    ExpiresByType application/javascript "access plus 1 week"
+</IfModule>

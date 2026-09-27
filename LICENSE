@@ -1,0 +1,25 @@
+Copyright (c) 2026 Sricodeboon (ศรีโค้ดบูรณ์). All rights reserved.
+
+This repository is published so that its source code can be viewed and studied.
+No license is granted to copy, modify, distribute, sublicense, host as a service,
+or use this software commercially, in whole or in part, without prior written
+permission from the copyright holder. Contact: sricodeboon@gmail.com
+
+สงวนลิขสิทธิ์ © 2569 ศรีโค้ดบูรณ์ เผยแพร่โค้ดเพื่อให้ดูและศึกษาได้เท่านั้น ไม่อนุญาตให้คัดลอก
+ดัดแปลง แจกจ่าย นำไปให้บริการ หรือใช้เชิงพาณิชย์ ไม่ว่าทั้งหมดหรือบางส่วน โดยไม่ได้รับอนุญาต
+เป็นลายลักษณ์อักษรจากเจ้าของลิขสิทธิ์
+
+-------------------------------------------------------------------------------
+Third-party material included in this repository keeps its own license:
+
+- htdocs/timetable/data/geo.json — derived from thailand-geography-json
+  MIT License, Copyright (c) 2023-Present Joe Takara
+  https://github.com/thailand-geography-data/thailand-geography-json
+
+- htdocs/timetable/data/schools/*.json — derived from the Ministry of Education
+  dataset "สถานศึกษาตามสังกัดของประเทศไทย" (data.go.th), Open Data Common license
+
+- Fonts in htdocs/assets/fonts and htdocs/timetable/assets/fonts
+  (IBM Plex Sans Thai, Chakra Petch, JetBrains Mono) — SIL Open Font License 1.1
+
+See htdocs/timetable/data/SOURCES.md for details.

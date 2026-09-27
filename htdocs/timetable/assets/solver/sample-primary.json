@@ -1,0 +1,1271 @@
+{
+ "meta": {
+  "format": "sricodeboon-timetable",
+  "version": 1,
+  "school": "โรงเรียนบ้านศรีโค้ด (ข้อมูลตัวอย่าง)",
+  "description": "ข้อมูลสมมติของโรงเรียนประถมขนาดเล็ก ป.1–ป.6 ชั้นละ 1 ห้อง ครูประจำชั้นสอนวิชาหลัก มีครูวิทย์ ครูอังกฤษ และครูพละแยก ชื่อบุคคลทั้งหมดเป็นชื่อสมมติ",
+  "dayNames": [
+   "จันทร์",
+   "อังคาร",
+   "พุธ",
+   "พฤหัสบดี",
+   "ศุกร์"
+  ]
+ },
+ "term": {
+  "name": "ภาคเรียนที่ 1 ปีการศึกษา 2569",
+  "days": 5,
+  "periods": [
+   {
+    "label": "1",
+    "start": "08:30",
+    "end": "09:30",
+    "type": "class"
+   },
+   {
+    "label": "2",
+    "start": "09:30",
+    "end": "10:30",
+    "type": "class"
+   },
+   {
+    "label": "3",
+    "start": "10:30",
+    "end": "11:30",
+    "type": "class"
+   },
+   {
+    "label": "พักกลางวัน",
+    "start": "11:30",
+    "end": "12:30",
+    "type": "break"
+   },
+   {
+    "label": "4",
+    "start": "12:30",
+    "end": "13:30",
+    "type": "class"
+   },
+   {
+    "label": "5",
+    "start": "13:30",
+    "end": "14:30",
+    "type": "class"
+   },
+   {
+    "label": "6",
+    "start": "14:30",
+    "end": "15:30",
+    "type": "class"
+   }
+  ]
+ },
+ "classes": [
+  {
+   "id": "c1",
+   "name": "ป.1",
+   "level": "ป.1"
+  },
+  {
+   "id": "c2",
+   "name": "ป.2",
+   "level": "ป.2"
+  },
+  {
+   "id": "c3",
+   "name": "ป.3",
+   "level": "ป.3"
+  },
+  {
+   "id": "c4",
+   "name": "ป.4",
+   "level": "ป.4"
+  },
+  {
+   "id": "c5",
+   "name": "ป.5",
+   "level": "ป.5"
+  },
+  {
+   "id": "c6",
+   "name": "ป.6",
+   "level": "ป.6"
+  }
+ ],
+ "teachers": [
+  {
+   "id": "t1",
+   "name": "นางสาวพิมพ์ชนก ใจงาม",
+   "short": "พิมพ์ชนก",
+   "maxPerDay": 5,
+   "unavailable": []
+  },
+  {
+   "id": "t2",
+   "name": "นางอรุณี แสงทอง",
+   "short": "อรุณี",
+   "maxPerDay": 5,
+   "unavailable": []
+  },
+  {
+   "id": "t3",
+   "name": "นางสาววาสนา บุญมา",
+   "short": "วาสนา",
+   "maxPerDay": 5,
+   "unavailable": []
+  },
+  {
+   "id": "t4",
+   "name": "นายสมชาย รักเรียน",
+   "short": "สมชาย",
+   "maxPerDay": 5,
+   "unavailable": []
+  },
+  {
+   "id": "t5",
+   "name": "นางจันทร์เพ็ญ ศรีสุข",
+   "short": "จันทร์เพ็ญ",
+   "maxPerDay": 5,
+   "unavailable": []
+  },
+  {
+   "id": "t6",
+   "name": "นายวีระพงษ์ ทองดี",
+   "short": "วีระพงษ์",
+   "maxPerDay": 5,
+   "unavailable": []
+  },
+  {
+   "id": "t7",
+   "name": "นางสาวกัญญารัตน์ วงศ์วิทย์",
+   "short": "กัญญารัตน์",
+   "maxPerDay": 5,
+   "unavailable": []
+  },
+  {
+   "id": "t8",
+   "name": "นางสาวเจนจิรา อินทร์แก้ว",
+   "short": "เจนจิรา",
+   "maxPerDay": 5,
+   "unavailable": []
+  },
+  {
+   "id": "t9",
+   "name": "นายธนวัฒน์ แข็งแรง",
+   "short": "ธนวัฒน์",
+   "maxPerDay": 5,
+   "unavailable": []
+  }
+ ],
+ "rooms": [
+  {
+   "id": "r1",
+   "name": "ห้องคอมพิวเตอร์",
+   "kind": "ห้องคอมพิวเตอร์"
+  }
+ ],
+ "subjects": [
+  {
+   "id": "s1",
+   "code": "ท11101",
+   "name": "ภาษาไทย ป.1",
+   "color": "#F4A6A6"
+  },
+  {
+   "id": "s2",
+   "code": "ค11101",
+   "name": "คณิตศาสตร์ ป.1",
+   "color": "#7FB0E8"
+  },
+  {
+   "id": "s3",
+   "code": "ว11101",
+   "name": "วิทยาศาสตร์และเทคโนโลยี ป.1",
+   "color": "#B9A7E8"
+  },
+  {
+   "id": "s4",
+   "code": "ว11103",
+   "name": "วิทยาการคำนวณ ป.1",
+   "color": "#8FA8C8"
+  },
+  {
+   "id": "s5",
+   "code": "ส11101",
+   "name": "สังคมศึกษา ศาสนาและวัฒนธรรม ป.1",
+   "color": "#E3B85A"
+  },
+  {
+   "id": "s6",
+   "code": "ส11102",
+   "name": "ประวัติศาสตร์ ป.1",
+   "color": "#D9A273"
+  },
+  {
+   "id": "s7",
+   "code": "พ11101",
+   "name": "สุขศึกษาและพลศึกษา ป.1",
+   "color": "#F7C59F"
+  },
+  {
+   "id": "s8",
+   "code": "ศ11101",
+   "name": "ศิลปะ ป.1",
+   "color": "#F0A6BD"
+  },
+  {
+   "id": "s9",
+   "code": "ง11101",
+   "name": "การงานอาชีพ ป.1",
+   "color": "#C9B79C"
+  },
+  {
+   "id": "s10",
+   "code": "อ11101",
+   "name": "ภาษาอังกฤษ ป.1",
+   "color": "#F2D16B"
+  },
+  {
+   "id": "s11",
+   "code": "ส11231",
+   "name": "หน้าที่พลเมือง ป.1",
+   "color": "#E8C5A0"
+  },
+  {
+   "id": "s12",
+   "code": "อ11201",
+   "name": "ภาษาอังกฤษเพื่อการสื่อสาร ป.1",
+   "color": "#F2D16B"
+  },
+  {
+   "id": "s13",
+   "code": "ท12101",
+   "name": "ภาษาไทย ป.2",
+   "color": "#F4A6A6"
+  },
+  {
+   "id": "s14",
+   "code": "ค12101",
+   "name": "คณิตศาสตร์ ป.2",
+   "color": "#7FB0E8"
+  },
+  {
+   "id": "s15",
+   "code": "ว12101",
+   "name": "วิทยาศาสตร์และเทคโนโลยี ป.2",
+   "color": "#B9A7E8"
+  },
+  {
+   "id": "s16",
+   "code": "ว12103",
+   "name": "วิทยาการคำนวณ ป.2",
+   "color": "#8FA8C8"
+  },
+  {
+   "id": "s17",
+   "code": "ส12101",
+   "name": "สังคมศึกษา ศาสนาและวัฒนธรรม ป.2",
+   "color": "#E3B85A"
+  },
+  {
+   "id": "s18",
+   "code": "ส12102",
+   "name": "ประวัติศาสตร์ ป.2",
+   "color": "#D9A273"
+  },
+  {
+   "id": "s19",
+   "code": "พ12101",
+   "name": "สุขศึกษาและพลศึกษา ป.2",
+   "color": "#F7C59F"
+  },
+  {
+   "id": "s20",
+   "code": "ศ12101",
+   "name": "ศิลปะ ป.2",
+   "color": "#F0A6BD"
+  },
+  {
+   "id": "s21",
+   "code": "ง12101",
+   "name": "การงานอาชีพ ป.2",
+   "color": "#C9B79C"
+  },
+  {
+   "id": "s22",
+   "code": "อ12101",
+   "name": "ภาษาอังกฤษ ป.2",
+   "color": "#F2D16B"
+  },
+  {
+   "id": "s23",
+   "code": "ส12231",
+   "name": "หน้าที่พลเมือง ป.2",
+   "color": "#E8C5A0"
+  },
+  {
+   "id": "s24",
+   "code": "อ12201",
+   "name": "ภาษาอังกฤษเพื่อการสื่อสาร ป.2",
+   "color": "#F2D16B"
+  },
+  {
+   "id": "s25",
+   "code": "ท13101",
+   "name": "ภาษาไทย ป.3",
+   "color": "#F4A6A6"
+  },
+  {
+   "id": "s26",
+   "code": "ค13101",
+   "name": "คณิตศาสตร์ ป.3",
+   "color": "#7FB0E8"
+  },
+  {
+   "id": "s27",
+   "code": "ว13101",
+   "name": "วิทยาศาสตร์และเทคโนโลยี ป.3",
+   "color": "#B9A7E8"
+  },
+  {
+   "id": "s28",
+   "code": "ว13103",
+   "name": "วิทยาการคำนวณ ป.3",
+   "color": "#8FA8C8"
+  },
+  {
+   "id": "s29",
+   "code": "ส13101",
+   "name": "สังคมศึกษา ศาสนาและวัฒนธรรม ป.3",
+   "color": "#E3B85A"
+  },
+  {
+   "id": "s30",
+   "code": "ส13102",
+   "name": "ประวัติศาสตร์ ป.3",
+   "color": "#D9A273"
+  },
+  {
+   "id": "s31",
+   "code": "พ13101",
+   "name": "สุขศึกษาและพลศึกษา ป.3",
+   "color": "#F7C59F"
+  },
+  {
+   "id": "s32",
+   "code": "ศ13101",
+   "name": "ศิลปะ ป.3",
+   "color": "#F0A6BD"
+  },
+  {
+   "id": "s33",
+   "code": "ง13101",
+   "name": "การงานอาชีพ ป.3",
+   "color": "#C9B79C"
+  },
+  {
+   "id": "s34",
+   "code": "อ13101",
+   "name": "ภาษาอังกฤษ ป.3",
+   "color": "#F2D16B"
+  },
+  {
+   "id": "s35",
+   "code": "ส13231",
+   "name": "หน้าที่พลเมือง ป.3",
+   "color": "#E8C5A0"
+  },
+  {
+   "id": "s36",
+   "code": "อ13201",
+   "name": "ภาษาอังกฤษเพื่อการสื่อสาร ป.3",
+   "color": "#F2D16B"
+  },
+  {
+   "id": "s37",
+   "code": "ท14101",
+   "name": "ภาษาไทย ป.4",
+   "color": "#F4A6A6"
+  },
+  {
+   "id": "s38",
+   "code": "ค14101",
+   "name": "คณิตศาสตร์ ป.4",
+   "color": "#7FB0E8"
+  },
+  {
+   "id": "s39",
+   "code": "ว14101",
+   "name": "วิทยาศาสตร์และเทคโนโลยี ป.4",
+   "color": "#B9A7E8"
+  },
+  {
+   "id": "s40",
+   "code": "ว14103",
+   "name": "วิทยาการคำนวณ ป.4",
+   "color": "#8FA8C8"
+  },
+  {
+   "id": "s41",
+   "code": "ส14101",
+   "name": "สังคมศึกษา ศาสนาและวัฒนธรรม ป.4",
+   "color": "#E3B85A"
+  },
+  {
+   "id": "s42",
+   "code": "ส14102",
+   "name": "ประวัติศาสตร์ ป.4",
+   "color": "#D9A273"
+  },
+  {
+   "id": "s43",
+   "code": "พ14101",
+   "name": "สุขศึกษาและพลศึกษา ป.4",
+   "color": "#F7C59F"
+  },
+  {
+   "id": "s44",
+   "code": "ศ14101",
+   "name": "ศิลปะ ป.4",
+   "color": "#F0A6BD"
+  },
+  {
+   "id": "s45",
+   "code": "ง14101",
+   "name": "การงานอาชีพ ป.4",
+   "color": "#C9B79C"
+  },
+  {
+   "id": "s46",
+   "code": "อ14101",
+   "name": "ภาษาอังกฤษ ป.4",
+   "color": "#F2D16B"
+  },
+  {
+   "id": "s47",
+   "code": "ส14231",
+   "name": "หน้าที่พลเมือง ป.4",
+   "color": "#E8C5A0"
+  },
+  {
+   "id": "s48",
+   "code": "อ14201",
+   "name": "ภาษาอังกฤษเพื่อการสื่อสาร ป.4",
+   "color": "#F2D16B"
+  },
+  {
+   "id": "s49",
+   "code": "ท15101",
+   "name": "ภาษาไทย ป.5",
+   "color": "#F4A6A6"
+  },
+  {
+   "id": "s50",
+   "code": "ค15101",
+   "name": "คณิตศาสตร์ ป.5",
+   "color": "#7FB0E8"
+  },
+  {
+   "id": "s51",
+   "code": "ว15101",
+   "name": "วิทยาศาสตร์และเทคโนโลยี ป.5",
+   "color": "#B9A7E8"
+  },
+  {
+   "id": "s52",
+   "code": "ว15103",
+   "name": "วิทยาการคำนวณ ป.5",
+   "color": "#8FA8C8"
+  },
+  {
+   "id": "s53",
+   "code": "ส15101",
+   "name": "สังคมศึกษา ศาสนาและวัฒนธรรม ป.5",
+   "color": "#E3B85A"
+  },
+  {
+   "id": "s54",
+   "code": "ส15102",
+   "name": "ประวัติศาสตร์ ป.5",
+   "color": "#D9A273"
+  },
+  {
+   "id": "s55",
+   "code": "พ15101",
+   "name": "สุขศึกษาและพลศึกษา ป.5",
+   "color": "#F7C59F"
+  },
+  {
+   "id": "s56",
+   "code": "ศ15101",
+   "name": "ศิลปะ ป.5",
+   "color": "#F0A6BD"
+  },
+  {
+   "id": "s57",
+   "code": "ง15101",
+   "name": "การงานอาชีพ ป.5",
+   "color": "#C9B79C"
+  },
+  {
+   "id": "s58",
+   "code": "อ15101",
+   "name": "ภาษาอังกฤษ ป.5",
+   "color": "#F2D16B"
+  },
+  {
+   "id": "s59",
+   "code": "ส15231",
+   "name": "หน้าที่พลเมือง ป.5",
+   "color": "#E8C5A0"
+  },
+  {
+   "id": "s60",
+   "code": "อ15201",
+   "name": "ภาษาอังกฤษเพื่อการสื่อสาร ป.5",
+   "color": "#F2D16B"
+  },
+  {
+   "id": "s61",
+   "code": "ท16101",
+   "name": "ภาษาไทย ป.6",
+   "color": "#F4A6A6"
+  },
+  {
+   "id": "s62",
+   "code": "ค16101",
+   "name": "คณิตศาสตร์ ป.6",
+   "color": "#7FB0E8"
+  },
+  {
+   "id": "s63",
+   "code": "ว16101",
+   "name": "วิทยาศาสตร์และเทคโนโลยี ป.6",
+   "color": "#B9A7E8"
+  },
+  {
+   "id": "s64",
+   "code": "ว16103",
+   "name": "วิทยาการคำนวณ ป.6",
+   "color": "#8FA8C8"
+  },
+  {
+   "id": "s65",
+   "code": "ส16101",
+   "name": "สังคมศึกษา ศาสนาและวัฒนธรรม ป.6",
+   "color": "#E3B85A"
+  },
+  {
+   "id": "s66",
+   "code": "ส16102",
+   "name": "ประวัติศาสตร์ ป.6",
+   "color": "#D9A273"
+  },
+  {
+   "id": "s67",
+   "code": "พ16101",
+   "name": "สุขศึกษาและพลศึกษา ป.6",
+   "color": "#F7C59F"
+  },
+  {
+   "id": "s68",
+   "code": "ศ16101",
+   "name": "ศิลปะ ป.6",
+   "color": "#F0A6BD"
+  },
+  {
+   "id": "s69",
+   "code": "ง16101",
+   "name": "การงานอาชีพ ป.6",
+   "color": "#C9B79C"
+  },
+  {
+   "id": "s70",
+   "code": "อ16101",
+   "name": "ภาษาอังกฤษ ป.6",
+   "color": "#F2D16B"
+  },
+  {
+   "id": "s71",
+   "code": "ส16231",
+   "name": "หน้าที่พลเมือง ป.6",
+   "color": "#E8C5A0"
+  },
+  {
+   "id": "s72",
+   "code": "อ16201",
+   "name": "ภาษาอังกฤษเพื่อการสื่อสาร ป.6",
+   "color": "#F2D16B"
+  }
+ ],
+ "assignments": [
+  {
+   "id": "a1",
+   "subjectId": "s1",
+   "classId": "c1",
+   "teacherId": "t1",
+   "roomId": null,
+   "perWeek": 5,
+   "doubles": 0
+  },
+  {
+   "id": "a2",
+   "subjectId": "s2",
+   "classId": "c1",
+   "teacherId": "t1",
+   "roomId": null,
+   "perWeek": 5,
+   "doubles": 0
+  },
+  {
+   "id": "a3",
+   "subjectId": "s3",
+   "classId": "c1",
+   "teacherId": "t7",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a4",
+   "subjectId": "s4",
+   "classId": "c1",
+   "teacherId": "t7",
+   "roomId": "r1",
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a5",
+   "subjectId": "s5",
+   "classId": "c1",
+   "teacherId": "t1",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a6",
+   "subjectId": "s6",
+   "classId": "c1",
+   "teacherId": "t1",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a7",
+   "subjectId": "s7",
+   "classId": "c1",
+   "teacherId": "t9",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a8",
+   "subjectId": "s8",
+   "classId": "c1",
+   "teacherId": "t1",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a9",
+   "subjectId": "s9",
+   "classId": "c1",
+   "teacherId": "t1",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a10",
+   "subjectId": "s10",
+   "classId": "c1",
+   "teacherId": "t8",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a11",
+   "subjectId": "s11",
+   "classId": "c1",
+   "teacherId": "t1",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a12",
+   "subjectId": "s12",
+   "classId": "c1",
+   "teacherId": "t8",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a13",
+   "subjectId": "s13",
+   "classId": "c2",
+   "teacherId": "t2",
+   "roomId": null,
+   "perWeek": 5,
+   "doubles": 0
+  },
+  {
+   "id": "a14",
+   "subjectId": "s14",
+   "classId": "c2",
+   "teacherId": "t2",
+   "roomId": null,
+   "perWeek": 5,
+   "doubles": 0
+  },
+  {
+   "id": "a15",
+   "subjectId": "s15",
+   "classId": "c2",
+   "teacherId": "t7",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a16",
+   "subjectId": "s16",
+   "classId": "c2",
+   "teacherId": "t7",
+   "roomId": "r1",
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a17",
+   "subjectId": "s17",
+   "classId": "c2",
+   "teacherId": "t2",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a18",
+   "subjectId": "s18",
+   "classId": "c2",
+   "teacherId": "t2",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a19",
+   "subjectId": "s19",
+   "classId": "c2",
+   "teacherId": "t9",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a20",
+   "subjectId": "s20",
+   "classId": "c2",
+   "teacherId": "t2",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a21",
+   "subjectId": "s21",
+   "classId": "c2",
+   "teacherId": "t2",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a22",
+   "subjectId": "s22",
+   "classId": "c2",
+   "teacherId": "t8",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a23",
+   "subjectId": "s23",
+   "classId": "c2",
+   "teacherId": "t2",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a24",
+   "subjectId": "s24",
+   "classId": "c2",
+   "teacherId": "t8",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a25",
+   "subjectId": "s25",
+   "classId": "c3",
+   "teacherId": "t3",
+   "roomId": null,
+   "perWeek": 5,
+   "doubles": 0
+  },
+  {
+   "id": "a26",
+   "subjectId": "s26",
+   "classId": "c3",
+   "teacherId": "t3",
+   "roomId": null,
+   "perWeek": 5,
+   "doubles": 0
+  },
+  {
+   "id": "a27",
+   "subjectId": "s27",
+   "classId": "c3",
+   "teacherId": "t7",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a28",
+   "subjectId": "s28",
+   "classId": "c3",
+   "teacherId": "t7",
+   "roomId": "r1",
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a29",
+   "subjectId": "s29",
+   "classId": "c3",
+   "teacherId": "t3",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a30",
+   "subjectId": "s30",
+   "classId": "c3",
+   "teacherId": "t3",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a31",
+   "subjectId": "s31",
+   "classId": "c3",
+   "teacherId": "t9",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a32",
+   "subjectId": "s32",
+   "classId": "c3",
+   "teacherId": "t3",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a33",
+   "subjectId": "s33",
+   "classId": "c3",
+   "teacherId": "t3",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a34",
+   "subjectId": "s34",
+   "classId": "c3",
+   "teacherId": "t8",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a35",
+   "subjectId": "s35",
+   "classId": "c3",
+   "teacherId": "t3",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a36",
+   "subjectId": "s36",
+   "classId": "c3",
+   "teacherId": "t8",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a37",
+   "subjectId": "s37",
+   "classId": "c4",
+   "teacherId": "t4",
+   "roomId": null,
+   "perWeek": 4,
+   "doubles": 0
+  },
+  {
+   "id": "a38",
+   "subjectId": "s38",
+   "classId": "c4",
+   "teacherId": "t4",
+   "roomId": null,
+   "perWeek": 4,
+   "doubles": 0
+  },
+  {
+   "id": "a39",
+   "subjectId": "s39",
+   "classId": "c4",
+   "teacherId": "t7",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a40",
+   "subjectId": "s40",
+   "classId": "c4",
+   "teacherId": "t7",
+   "roomId": "r1",
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a41",
+   "subjectId": "s41",
+   "classId": "c4",
+   "teacherId": "t4",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a42",
+   "subjectId": "s42",
+   "classId": "c4",
+   "teacherId": "t4",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a43",
+   "subjectId": "s43",
+   "classId": "c4",
+   "teacherId": "t9",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a44",
+   "subjectId": "s44",
+   "classId": "c4",
+   "teacherId": "t4",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a45",
+   "subjectId": "s45",
+   "classId": "c4",
+   "teacherId": "t4",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a46",
+   "subjectId": "s46",
+   "classId": "c4",
+   "teacherId": "t8",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a47",
+   "subjectId": "s47",
+   "classId": "c4",
+   "teacherId": "t4",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a48",
+   "subjectId": "s48",
+   "classId": "c4",
+   "teacherId": "t8",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a49",
+   "subjectId": "s49",
+   "classId": "c5",
+   "teacherId": "t5",
+   "roomId": null,
+   "perWeek": 4,
+   "doubles": 0
+  },
+  {
+   "id": "a50",
+   "subjectId": "s50",
+   "classId": "c5",
+   "teacherId": "t5",
+   "roomId": null,
+   "perWeek": 4,
+   "doubles": 0
+  },
+  {
+   "id": "a51",
+   "subjectId": "s51",
+   "classId": "c5",
+   "teacherId": "t7",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a52",
+   "subjectId": "s52",
+   "classId": "c5",
+   "teacherId": "t7",
+   "roomId": "r1",
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a53",
+   "subjectId": "s53",
+   "classId": "c5",
+   "teacherId": "t5",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a54",
+   "subjectId": "s54",
+   "classId": "c5",
+   "teacherId": "t5",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a55",
+   "subjectId": "s55",
+   "classId": "c5",
+   "teacherId": "t9",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a56",
+   "subjectId": "s56",
+   "classId": "c5",
+   "teacherId": "t5",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a57",
+   "subjectId": "s57",
+   "classId": "c5",
+   "teacherId": "t5",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a58",
+   "subjectId": "s58",
+   "classId": "c5",
+   "teacherId": "t8",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a59",
+   "subjectId": "s59",
+   "classId": "c5",
+   "teacherId": "t5",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a60",
+   "subjectId": "s60",
+   "classId": "c5",
+   "teacherId": "t8",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a61",
+   "subjectId": "s61",
+   "classId": "c6",
+   "teacherId": "t6",
+   "roomId": null,
+   "perWeek": 4,
+   "doubles": 0
+  },
+  {
+   "id": "a62",
+   "subjectId": "s62",
+   "classId": "c6",
+   "teacherId": "t6",
+   "roomId": null,
+   "perWeek": 4,
+   "doubles": 0
+  },
+  {
+   "id": "a63",
+   "subjectId": "s63",
+   "classId": "c6",
+   "teacherId": "t7",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a64",
+   "subjectId": "s64",
+   "classId": "c6",
+   "teacherId": "t7",
+   "roomId": "r1",
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a65",
+   "subjectId": "s65",
+   "classId": "c6",
+   "teacherId": "t6",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a66",
+   "subjectId": "s66",
+   "classId": "c6",
+   "teacherId": "t6",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a67",
+   "subjectId": "s67",
+   "classId": "c6",
+   "teacherId": "t9",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a68",
+   "subjectId": "s68",
+   "classId": "c6",
+   "teacherId": "t6",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a69",
+   "subjectId": "s69",
+   "classId": "c6",
+   "teacherId": "t6",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a70",
+   "subjectId": "s70",
+   "classId": "c6",
+   "teacherId": "t8",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  },
+  {
+   "id": "a71",
+   "subjectId": "s71",
+   "classId": "c6",
+   "teacherId": "t6",
+   "roomId": null,
+   "perWeek": 1,
+   "doubles": 0
+  },
+  {
+   "id": "a72",
+   "subjectId": "s72",
+   "classId": "c6",
+   "teacherId": "t8",
+   "roomId": null,
+   "perWeek": 2,
+   "doubles": 0
+  }
+ ],
+ "locks": [
+  {
+   "classId": null,
+   "day": 2,
+   "period": 6,
+   "label": "ลูกเสือ-เนตรนารี"
+  },
+  {
+   "classId": null,
+   "day": 3,
+   "period": 6,
+   "label": "แนะแนว"
+  },
+  {
+   "classId": null,
+   "day": 4,
+   "period": 6,
+   "label": "ชุมนุม"
+  }
+ ]
+}

@@ -1,0 +1,5 @@
+ฟอนต์ทั้งหมดในโฟลเดอร์นี้ใช้สัญญาอนุญาต SIL Open Font License 1.1
+- Chakra Petch © Cadson Demak
+- IBM Plex Sans Thai © IBM Corp.
+- JetBrains Mono © JetBrains
+ที่มา: Google Fonts (ชุด thai + latin)

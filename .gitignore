@@ -1,0 +1,10 @@
+htdocs/config.php
+.DS_Store
+
+# secret ของ Google/LINE และฐานข้อมูล — ห้ามขึ้น git
+htdocs/timetable/config.php
+htdocs/timetable/storage/*.sqlite*
+
+# บันทึกส่งต่องานภายใน (มีอีเมล/เลขบัญชีโฮสต์) และไฟล์ zip สำหรับอัปโหลด — ไม่เผยแพร่
+HANDOFF.md
+*.zip
