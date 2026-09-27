@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . '/lib/bootstrap.php';
 require __DIR__ . '/lib/layout.php';
+const GITHUB_URL = 'https://github.com/sricodeboon/taraang-boriboon';
 
 $u = current_user();
 if ($u) redirect($u['school_id'] ? 'app.php' : 'signup.php');
@@ -32,7 +33,7 @@ page_head('ตารางบริบูรณ์ · จัดตาราง�
   .line-btn { background:#06C755; border-color:#06C755; color:#fff; font-weight:600; }
   .or { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:.85rem; }
   .or::before, .or::after { content:""; flex:1; border-top:1px solid var(--line); }
-  .top { display:flex; justify-content:space-between; align-items:center; padding-block:18px; }
+  .top { display:flex; justify-content:space-between; align-items:center; padding-block:18px; gap:10px; flex-wrap:wrap; }
   .soon { font-size:.78rem; color:var(--muted); font-weight:400; }
   .foot { padding-block:24px 40px; color:var(--muted); font-size:.86rem; border-top:1px solid var(--line); }
   @media (max-width:820px) { .hero { grid-template-columns:1fr; padding-top:16px; } }
@@ -41,7 +42,10 @@ page_head('ตารางบริบูรณ์ · จัดตาราง�
 <main class="wrap">
   <header class="top">
     <?= brand_html() ?>
-    <a class="btn btn-sm" href="guide.php">คู่มือการใช้งาน</a>
+    <nav style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+      <a class="btn btn-sm" href="<?= GITHUB_URL ?>" target="_blank" rel="noopener" title="ซอร์สโค้ดบน GitHub">ดาวน์โหลดโปรแกรม</a>
+      <a class="btn btn-sm" href="guide.php">คู่มือการใช้งาน</a>
+    </nav>
   </header>
 
   <section class="hero">
@@ -83,6 +87,7 @@ page_head('ตารางบริบูรณ์ · จัดตาราง�
 
   <footer class="foot">
     ตารางบริบูรณ์ · โดย <a href="../">ศรีโค้ดบูรณ์</a> ครูแจ็ก นาทม นครพนม · <a href="guide.php">คู่มือ</a> · <a href="terms.php">ข้อกำหนดการใช้งาน</a> · <a href="privacy.php">นโยบายความเป็นส่วนตัว</a>
+    · ดาวน์โหลดโปรแกรม: <a href="<?= GITHUB_URL ?>" target="_blank" rel="noopener">GitHub</a> (<a href="<?= GITHUB_URL ?>/archive/refs/heads/main.zip">.zip</a>)
   </footer>
 </main>
 <?php page_foot();
