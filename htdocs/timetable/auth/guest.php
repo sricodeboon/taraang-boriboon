@@ -28,4 +28,4 @@ db_tx(function () use ($user) {
     create_term($schoolId, (int) $user['id'], 'sample');
 });
 flash('เข้าสู่โหมดทดลองแล้ว ข้อมูลตัวอย่างพร้อมให้ลองจัด (ลบเองใน 2 วัน)', 'ok');
-redirect('app.php');
+redirect(after_login('app.php'));

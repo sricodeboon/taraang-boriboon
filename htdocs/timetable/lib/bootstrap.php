@@ -73,12 +73,30 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_name('ttsid');
     session_set_cookie_params([
         'lifetime' => 60 * 60 * 24 * 30,
-        'path' => parse_url(base_url(), PHP_URL_PATH) ?: '/',
+        // path '/' = ใช้ล็อกอินร่วมกับระบบพี่น้องในโดเมนเดียวกัน (คลังบริบูรณ์ /khlang/) — สมัครที่นี่ที่เดียวเข้าได้ทั้งสองระบบ
+        'path' => '/',
         'secure' => $secure,
         'httponly' => true,
         'samesite' => 'Lax',
     ]);
     session_start();
+    // ย้ายคุกกี้รุ่นเก่า (path=/timetable) มาเป็น path=/ ครั้งเดียวต่อ session โดยไม่ต้องเข้าสู่ระบบใหม่
+    if (PHP_SAPI !== 'cli' && empty($_SESSION['ck_root']) && isset($_COOKIE[session_name()])) {
+        $oldPath = parse_url(base_url(), PHP_URL_PATH) ?: '';
+        if ($oldPath !== '' && $oldPath !== '/') setcookie(session_name(), '', ['expires' => 1, 'path' => $oldPath, 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
+        setcookie(session_name(), session_id(), ['expires' => time() + 60 * 60 * 24 * 30, 'path' => '/', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
+        $_SESSION['ck_root'] = 1;
+    }
+}
+
+/**
+ * หลังเข้าสู่ระบบ/ลงทะเบียนโรงเรียน: ถ้ามาจากคลังบริบูรณ์ (ตั้ง tt_next ไว้) ให้กลับไปที่นั่น
+ * ยังไม่มีโรงเรียน (ไป signup.php) → เก็บ tt_next ไว้ใช้ตอนลงทะเบียนเสร็จ
+ */
+function after_login(string $default): string {
+    if (($_SESSION['tt_next'] ?? '') !== 'khlang' || $default !== 'app.php') return $default;
+    unset($_SESSION['tt_next']);
+    return preg_replace('#/[^/]*$#', '', base_url()) . '/khlang/';
 }
 
 // ---------- helpers ----------

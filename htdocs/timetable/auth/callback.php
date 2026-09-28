@@ -8,7 +8,7 @@ try {
     $info = oauth_finish($p, (string) ($_GET['code'] ?? ''), (string) ($_GET['state'] ?? ''));
     $user = login_user($p, $info['uid'], $info['name'], $info['email'], $info['avatar']);
     flash('เข้าสู่ระบบสำเร็จ' . ($info['name'] ? ' · ' . mb_substr((string) $info['name'], 0, 60) : ''), 'ok');
-    redirect($user['school_id'] ? 'app.php' : 'signup.php');
+    redirect(after_login($user['school_id'] ? 'app.php' : 'signup.php'));
 } catch (Throwable $e) {
     error_log('OAuth callback: ' . $e->getMessage());
     // PDOException เป็นลูกของ RuntimeException — ห้ามโชว์ข้อความฐานข้อมูล (มี SQL/พาธไฟล์) ให้ผู้ใช้เห็น

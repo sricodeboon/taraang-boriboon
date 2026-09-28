@@ -7,7 +7,7 @@ require __DIR__ . '/lib/school.php';
 
 $u = current_user();
 if (!$u) redirect('index.php');
-if ($u['school_id']) redirect('app.php');
+if ($u['school_id']) redirect(after_login('app.php'));
 
 $error = flash(); // เช่น แจ้งหมดเวลาจาก csrf_check() แล้วให้กดใหม่
 $errorKind = flash_kind();
@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             create_term($sid, (int) $u['id'], $v['template'], 'ภาคเรียนที่ 1/' . ((int) date('Y') + 543), $v['template'] === 'blank' ? $v['band'] : null);
         });
         flash('ลงทะเบียนโรงเรียนแล้ว เริ่มจัดตารางได้เลย', 'ok');
-        redirect('app.php');
+        redirect(after_login('app.php'));
     }
 }
 

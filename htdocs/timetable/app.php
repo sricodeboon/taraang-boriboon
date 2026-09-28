@@ -36,6 +36,7 @@ page_head('จัดตาราง · ' . $school['name'], '<style>' . file_get
     <span id="save-state" class="pill" aria-live="polite">กำลังโหลด…</span>
     <div class="bar-user">
       <?php if (is_admin($user)): ?><a class="btn btn-sm" href="admin.php">ผู้ดูแลระบบ</a><?php endif; ?>
+      <a class="btn btn-sm" href="../khlang/" title="คลังบริบูรณ์ ทะเบียนครุภัณฑ์ (ใช้บัญชีเดียวกัน)">ครุภัณฑ์</a>
       <a class="btn btn-sm" href="guide.php" target="_blank" rel="noopener">คู่มือ</a>
       <form method="post" action="auth/logout.php">
         <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">

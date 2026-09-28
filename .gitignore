@@ -17,3 +17,6 @@ htdocs/dpa/
 
 # ระบบกีฬาสี ช้างเผือกเกมส์ มี repo แยก: github.com/sricodeboon/kilasi (โฟลเดอร์นี้เป็น git repo ของตัวเอง)
 htdocs/kilasi/
+
+# คลังบริบูรณ์ ระบบทะเบียนครุภัณฑ์ มี repo แยก (โฟลเดอร์นี้เป็น git repo ของตัวเอง)
+htdocs/khlang/
