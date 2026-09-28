@@ -60,6 +60,11 @@ function migrate(PDO $pdo, string $driver): void {
         updated_at DATETIME NOT NULL,
         updated_by INT NULL
     )$tail");
+    // จำกัดอัตราการสร้างข้อมูล (เพิ่ม 28 ก.ย. 69): เก็บแค่ชื่อถัง (IP แบบแฮช) + เวลา ลบทิ้งเองหลัง 1 วัน
+    $pdo->exec("CREATE TABLE IF NOT EXISTS rate_hits (
+        bucket VARCHAR(100) NOT NULL,
+        at INT NOT NULL
+    )$tail");
     // โลโก้โรงเรียน (เพิ่ม 27 ก.ย. 69): เก็บเป็น data URL PNG/JPEG ในฐาน · logo_rev ใช้เป็นเลขเวอร์ชันกันแคชรูปเก่า
     try {
         $pdo->query('SELECT logo_rev FROM schools LIMIT 0');
@@ -88,4 +93,22 @@ function db_exec(string $sql, array $args = []): int {
     $st = db()->prepare($sql);
     $st->execute($args);
     return $st->rowCount();
+}
+
+/** IP ผู้ใช้แบบแฮช (ไม่เก็บ IP จริง) ใช้เป็นชื่อถังของ rate limit */
+function client_key(): string {
+    return substr(hash('sha256', 'tt-rl|' . ($_SERVER['REMOTE_ADDR'] ?? '-')), 0, 32);
+}
+
+/**
+ * นับครั้งในหน้าต่างเวลา: เกิน $max ครั้งใน $window วินาที → true (ถูกจำกัด) · ไม่เกิน → บันทึกครั้งนี้แล้วคืน false
+ * ใช้กับงานที่สร้างข้อมูลได้โดยไม่ต้องล็อกอิน เช่น โหมดทดลอง
+ */
+function rate_limited(string $bucket, int $max, int $window): bool {
+    $now = time();
+    db_exec('DELETE FROM rate_hits WHERE at < ?', [$now - 86400]); // ตารางเล็ก ลบของเก่ากว่า 1 วันทุกครั้ง
+    $n = (int) db_one('SELECT COUNT(*) AS n FROM rate_hits WHERE bucket = ? AND at > ?', [$bucket, $now - $window])['n'];
+    if ($n >= $max) return true;
+    db_exec('INSERT INTO rate_hits (bucket, at) VALUES (?, ?)', [$bucket, $now]);
+    return false;
 }

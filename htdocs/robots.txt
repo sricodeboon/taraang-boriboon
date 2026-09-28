@@ -4,5 +4,6 @@ Allow: /
 # API และขั้นตอนล็อกอินไม่ต้องเก็บเข้าดัชนี (หน้าอื่นที่ต้องล็อกอินจะ redirect เองเมื่อไม่มี session)
 Disallow: /timetable/api.php
 Disallow: /timetable/auth/
+Disallow: /status.php
 
 Sitemap: https://sricodeboon.infinityfreeapp.com/sitemap.xml

@@ -3,6 +3,17 @@
 declare(strict_types=1);
 
 date_default_timezone_set('Asia/Bangkok');
+// ไม่แสดง error/stack trace ให้ผู้ใช้เห็น (โฮสต์ฟรีบางที่เปิด display_errors ไว้) — เก็บลง error log แทน
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+set_exception_handler(function (Throwable $e): void {
+    error_log('Uncaught ' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+    }
+    echo 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้ง';
+});
 // บีบอัด HTML/JSON ด้วย gzip (โฮสต์ฟรีบางที่ไม่บีบให้ และ php -S ไม่บีบเลย) — ob_gzhandler ดู Accept-Encoding เอง
 if (PHP_SAPI !== 'cli' && extension_loaded('zlib') && !ini_get('zlib.output_compression')) ob_start('ob_gzhandler');
 define('APP_ROOT', dirname(__DIR__));
@@ -31,9 +42,33 @@ function base_url(string $path = ''): string {
     return $base . ($path === '' ? '' : '/' . ltrim($path, '/'));
 }
 
+// ---------- security headers ----------
+/** nonce ของ CSP ต่อคำขอ: ใส่ใน <script nonce="…"> ทุกตัวที่เขียนในหน้า (inline + importmap) */
+function csp_nonce(): string {
+    static $n = null;
+    return $n ??= base64_encode(random_bytes(16));
+}
+
+if (PHP_SAPI !== 'cli' && !headers_sent()) {
+    $isHttps = !empty($_SERVER['HTTPS']) || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
+    // สคริปต์: ไฟล์ในเว็บเดียวกัน + cdnjs (pdfmake/ExcelJS) + inline ที่มี nonce เท่านั้น → HTML ที่ถูกฉีดเข้ามารันสคริปต์ไม่ได้
+    // style ยังต้อง 'unsafe-inline' (หน้าใช้ style="" และ <style> ฝังในหน้าเยอะ) · รูป: https: สำหรับรูปโปรไฟล์ Google/LINE
+    header("Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-" . csp_nonce() . "' https://cdnjs.cloudflare.com; "
+        . "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' data: blob:; "
+        . "worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
+    header('X-Frame-Options: DENY');
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+    if ($isHttps) header('Strict-Transport-Security: max-age=15552000');
+}
+
 // ---------- session ----------
 if (session_status() !== PHP_SESSION_ACTIVE) {
     $secure = !empty($_SERVER['HTTPS']) || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
+    // ไม่รับ session id ที่เซิร์ฟเวอร์ไม่ได้สร้างเอง (กัน session fixation) — ไม่กระทบอายุ session
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.use_only_cookies', '1');
     session_name('ttsid');
     session_set_cookie_params([
         'lifetime' => 60 * 60 * 24 * 30,

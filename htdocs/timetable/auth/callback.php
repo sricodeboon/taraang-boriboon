@@ -10,6 +10,7 @@ try {
     redirect($user['school_id'] ? 'app.php' : 'signup.php');
 } catch (Throwable $e) {
     error_log('OAuth callback: ' . $e->getMessage());
-    flash($e instanceof RuntimeException ? $e->getMessage() : 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่');
+    // PDOException เป็นลูกของ RuntimeException — ห้ามโชว์ข้อความฐานข้อมูล (มี SQL/พาธไฟล์) ให้ผู้ใช้เห็น
+    flash($e instanceof RuntimeException && !$e instanceof PDOException ? $e->getMessage() : 'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่');
     redirect('index.php');
 }

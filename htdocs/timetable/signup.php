@@ -3,6 +3,7 @@
 require __DIR__ . '/lib/bootstrap.php';
 require __DIR__ . '/lib/layout.php';
 require __DIR__ . '/lib/terms.php';
+require __DIR__ . '/lib/school.php';
 
 $u = current_user();
 if (!$u) redirect('index.php');
@@ -15,12 +16,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach ($v as $k => $_) $v[$k] = trim((string) ($_POST[$k] ?? ''));
     if (!in_array($v['template'], TEMPLATE_KINDS, true)) $v['template'] = 'sample';
     if (!in_array($v['band'], [...SUBJECT_BANDS, 'none'], true)) $v['band'] = 'primary';
-    if (mb_strlen($v['name']) < 3) $error = 'กรุณากรอกชื่อโรงเรียน';
-    elseif ($v['province'] === '') $error = 'กรุณาเลือกจังหวัด';
-    elseif (mb_strlen($v['name']) > 200) $error = 'ชื่อโรงเรียนยาวเกินไป';
+    // ตรวจชุดเดียวกับแก้ข้อมูลโรงเรียนใน api.php (รวมความยาวตำบล/อำเภอ/รหัส — SQLite ไม่บังคับความยาว VARCHAR เอง)
+    $s = $v;
+    $error = validate_school($s);
     if (!$error) {
         db_exec('INSERT INTO schools (name, school_code, tambon, amphoe, province, created_at) VALUES (?,?,?,?,?,?)',
-            [$v['name'], $v['code'] ?: null, $v['tambon'] ?: null, $v['amphoe'] ?: null, $v['province'], now()]);
+            [$s['name'], $s['code'], $s['tambon'], $s['amphoe'], $s['province'], now()]);
         $sid = (int) db()->lastInsertId();
         db_exec('UPDATE users SET school_id = ?, role = ? WHERE id = ?', [$sid, 'owner', $u['id']]);
         create_term($sid, (int) $u['id'], $v['template'], 'ภาคเรียนที่ 1/' . ((int) date('Y') + 543), $v['template'] === 'blank' ? $v['band'] : null);
@@ -100,7 +101,7 @@ page_head('ลงทะเบียนโรงเรียน · ตารา�
     <p class="hint" style="margin:0">เมื่อกดลงทะเบียน ถือว่าคุณยอมรับ<a href="terms.php" target="_blank" rel="noopener">ข้อกำหนดการใช้งาน</a>และ<a href="privacy.php" target="_blank" rel="noopener">นโยบายความเป็นส่วนตัว</a></p>
   </form>
 </main>
-<script type="module">
+<script type="module" nonce="<?= csp_nonce() ?>">
 import { attachGeo } from './assets/geo.js?v=<?= (int) @filemtime(APP_ROOT . '/assets/geo.js') ?>';
 const $ = (id) => document.getElementById(id);
 attachGeo({ province: $('province'), name: $('name'), amphoe: $('amphoe'), tambon: $('tambon'), code: $('code'), hint: $('school-hint') });

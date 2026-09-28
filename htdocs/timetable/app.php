@@ -14,7 +14,7 @@ $v = fn(string $f) => @filemtime(APP_ROOT . '/' . $f);
 $mods = ['store.js', 'ui.js', 'board.js', 'data.js', 'periods.js', 'export.js', 'school.js', 'geo.js', 'curriculum.js', 'pdf.js', 'solver/solver.js'];
 $map = [];
 foreach ($mods as $m) $map['./assets/' . $m] = './assets/' . $m . '?v=' . $v('assets/' . $m);
-$importMap = '<script type="importmap">' . $js(['imports' => $map]) . '</script>';
+$importMap = '<script type="importmap" nonce="' . csp_nonce() . '">' . $js(['imports' => $map]) . '</script>';
 // ฝัง board.css และ preload โมดูลที่ใช้ตอนเปิดหน้า (ไม่ต้องรอ app.js โหลดเสร็จก่อนจึงค่อยเห็น import ถัดไป)
 $preload = implode('', array_map(fn($m) => '<link rel="modulepreload" href="' . h($map['./assets/' . $m]) . '">', array_slice($mods, 0, 9)));
 page_head('จัดตาราง · ' . $school['name'], '<style>' . file_get_contents(APP_ROOT . '/assets/board.css') . '</style>' . $importMap . $preload);
@@ -52,6 +52,6 @@ page_head('จัดตาราง · ' . $school['name'], '<style>' . file_get
   </main>
   <div id="toast" class="toast" role="status" hidden></div>
 </div>
-<script>window.TT = { csrf: <?= json_encode(csrf_token()) ?>, school: <?= $js(school_public($school)) ?>, owner: <?= is_owner($user) ? 'true' : 'false' ?>, flash: <?= $js(flash()) ?>, boot: <?= $js(['terms' => $bootTerms, 'term' => $bootTerm]) ?> };</script>
-<script type="module" src="assets/app.js?v=<?= $v('assets/app.js') ?>"></script>
+<script nonce="<?= csp_nonce() ?>">window.TT = { csrf: <?= json_encode(csrf_token()) ?>, school: <?= $js(school_public($school)) ?>, owner: <?= is_owner($user) ? 'true' : 'false' ?>, flash: <?= $js(flash()) ?>, boot: <?= $js(['terms' => $bootTerms, 'term' => $bootTerm]) ?> };</script>
+<script type="module" nonce="<?= csp_nonce() ?>" src="assets/app.js?v=<?= $v('assets/app.js') ?>"></script>
 <?php page_foot();

@@ -57,6 +57,7 @@ export function render(el) {
 
 // ---------- Excel (ExcelJS: มีเส้นตาราง สีวิชา โลโก้ และตั้งหน้ากระดาษพร้อมพิมพ์) ----------
 const EXCELJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+const EXCELJS_SRI = 'sha512-dlPw+ytv/6JyepmelABrgeYgHI0O+frEwgfnPdXDTOIZz+eDgfW07QXG02/O8COfivBdGNINy+Vex+lYmJ5rxw==';
 const XL = { ink: '0F2438', muted: '5B6B7A', line: '9AA5B1', head: 'EEF2F6', brk: 'F4F5F7', lock: 'E9E6F2', clash: 'FBE3E3' };
 const argb = (hex) => 'FF' + String(hex || '').replace('#', '').toUpperCase();
 const thin = { style: 'thin', color: { argb: argb(XL.line) } };
@@ -87,6 +88,8 @@ function loadExcelJS() {
   return new Promise((ok, fail) => {
     const s = document.createElement('script');
     s.src = EXCELJS_URL;
+    s.integrity = EXCELJS_SRI; // SRI: ไฟล์บน CDN ถูกแก้ → ไม่รัน
+    s.crossOrigin = 'anonymous';
     s.onload = () => ok(window.ExcelJS);
     s.onerror = () => fail(new Error('โหลดตัวสร้าง Excel ไม่ได้ ตรวจอินเทอร์เน็ตแล้วลองใหม่'));
     document.head.appendChild(s);

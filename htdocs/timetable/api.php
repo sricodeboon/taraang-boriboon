@@ -55,7 +55,9 @@ try {
             if (!$isPost) json_out(['error' => 'ต้องใช้ POST'], 405);
             $b = body();
             $count = (int) db_one('SELECT COUNT(*) AS n FROM terms WHERE school_id = ?', [$sid])['n'];
-            if ($count >= 20) json_out(['error' => 'สร้างได้ไม่เกิน 20 ภาคเรียนต่อโรงเรียน'], 422);
+            // โหมดทดลองสร้างได้น้อยกว่า (ไม่ต้องล็อกอินจึงถูกใช้สร้างข้อมูลขยะได้ง่าย)
+            $maxTerms = $user['provider'] === 'guest' ? 3 : 20;
+            if ($count >= $maxTerms) json_out(['error' => "สร้างได้ไม่เกิน $maxTerms ภาคเรียนต่อโรงเรียน"], 422);
             $kind = in_array($b['template'] ?? '', [...TEMPLATE_KINDS, 'copy'], true) ? $b['template'] : 'blank';
             $band = in_array($b['band'] ?? null, SUBJECT_BANDS, true) ? $b['band'] : null;
             $name = mb_substr(trim((string) ($b['name'] ?? '')), 0, 200) ?: null;

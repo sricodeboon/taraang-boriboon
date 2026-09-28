@@ -21,6 +21,7 @@ export const idx = { cls: new Map(), tch: new Map(), room: new Map(), subj: new 
 export function index() {
   const d = store.doc;
   if (!d) return;
+  sanitize(d);
   idx.cls = new Map(d.classes.map((x) => [x.id, x]));
   idx.tch = new Map(d.teachers.map((x) => [x.id, x]));
   idx.room = new Map(d.rooms.map((x) => [x.id, x]));
@@ -28,6 +29,36 @@ export function index() {
   idx.asg = new Map(d.assignments.map((x) => [x.id, x]));
   idx.placed = new Map();
   for (const p of d.placements) idx.placed.set(p.assignmentId, (idx.placed.get(p.assignmentId) || 0) + 1);
+}
+
+// ---------- ทำความสะอาดเอกสาร ----------
+// เอกสารมาจากเซิร์ฟเวอร์หรือไฟล์สำรองที่ผู้ใช้นำเข้า (แก้มือได้) — ค่าที่หน้าจอพิมพ์ลง HTML ตรง ๆ (ตัวเลข, สี)
+// ต้องเป็นชนิดที่ถูกต้องเสมอ ไม่งั้นไฟล์สำรองที่ถูกดัดแปลงฝัง HTML/สคริปต์ผ่าน innerHTML ได้
+const toInt = (v, def = 0) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) ? n : def; };
+const HEX = /^#[0-9a-f]{3,8}$/i;
+function sanitize(d) {
+  if (!d.term || typeof d.term !== 'object') d.term = {};
+  d.term.days = Math.min(7, Math.max(1, toInt(d.term.days, 5)));
+  // ตัดรายการเสียออกแบบแก้ในอาร์เรย์เดิม (หน้าจอถืออ้างอิงอาร์เรย์ไว้ ห้ามสร้างอาร์เรย์ใหม่)
+  const clean = (arr) => { for (let i = arr.length - 1; i >= 0; i--) if (!arr[i] || typeof arr[i] !== 'object') arr.splice(i, 1); };
+  if (!Array.isArray(d.term.periods)) d.term.periods = [];
+  clean(d.term.periods);
+  for (const k of ['classes', 'teachers', 'rooms', 'subjects', 'assignments', 'locks', 'placements']) {
+    if (!Array.isArray(d[k])) d[k] = [];
+    clean(d[k]);
+  }
+  for (const t of d.teachers) {
+    if (t.maxPerDay != null) t.maxPerDay = Math.max(0, toInt(t.maxPerDay));
+    if (t.unavailable != null && !(Array.isArray(t.unavailable) && t.unavailable.every((u) => Array.isArray(u) && Number.isInteger(u[0]) && Number.isInteger(u[1])))) {
+      t.unavailable = Array.isArray(t.unavailable) ? t.unavailable.filter(Array.isArray).map(([x, y]) => [toInt(x), toInt(y)]) : [];
+    }
+  }
+  for (const s of d.subjects) if (s.color != null && !HEX.test(String(s.color))) s.color = SUBJECT_COLORS[0];
+  for (const a of d.assignments) {
+    if (a.perWeek != null) a.perWeek = Math.max(0, toInt(a.perWeek));
+    if (a.doubles != null) a.doubles = Math.max(0, toInt(a.doubles));
+  }
+  for (const x of [...d.locks, ...d.placements]) { x.day = toInt(x.day); x.period = toInt(x.period); }
 }
 
 export const remaining = (a) => Math.max(0, (a.perWeek || 0) - (idx.placed.get(a.id) || 0));

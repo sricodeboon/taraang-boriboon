@@ -3,11 +3,20 @@
 declare(strict_types=1);
 date_default_timezone_set('Asia/Bangkok');
 
+header('X-Robots-Tag: noindex, nofollow');
+header('Cache-Control: no-store');
+header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+
 $db = ['state' => 'skip', 'detail' => 'ยังไม่ได้ตั้งค่า config.php'];
 $configFile = __DIR__ . '/config.php';
+$cfg = is_file($configFile) ? (array) require $configFile : [];
 
-if (is_file($configFile)) {
-    $cfg = require $configFile;
+// รายละเอียด (เวอร์ชัน PHP/cURL/SQLite, สถานะ DB) เปิดเผยเฉพาะผู้ที่รู้คีย์: /status.php?k=<status_key ใน config.php>
+// ไม่มีคีย์หรือคีย์ผิด → แสดงแค่ว่าเว็บออนไลน์ ไม่บอกเวอร์ชันซอฟต์แวร์ และไม่แตะฐานข้อมูล (กันการยิงหน้าให้ INSERT ซ้ำ ๆ)
+$key = (string) ($cfg['status_key'] ?? '');
+$full = strlen($key) >= 16 && hash_equals($key, (string) ($_GET['k'] ?? ''));
+
+if ($full && isset($cfg['host'])) {
     try {
         $pdo = new PDO(
             "mysql:host={$cfg['host']};dbname={$cfg['name']};charset=utf8mb4",
@@ -30,7 +39,11 @@ if (is_file($configFile)) {
     }
 }
 
-$checks = [
+$checks = !$full ? [
+    ['เว็บไซต์', 'ok', 'ออนไลน์'],
+    ['HTTPS', !empty($_SERVER['HTTPS']) || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https' ? 'ok' : 'skip',
+        !empty($_SERVER['HTTPS']) || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https' ? 'เปิดใช้งาน' : 'ยังไม่เปิด SSL'],
+] : [
     ['PHP', 'ok', 'PHP ' . PHP_VERSION],
     ['เวลาเซิร์ฟเวอร์', 'ok', date('j/n/Y H:i:s') . ' (Asia/Bangkok)'],
     ['HTTPS', !empty($_SERVER['HTTPS']) || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https' ? 'ok' : 'skip',
@@ -47,6 +60,7 @@ $icon = ['ok' => '✅', 'skip' => '⏳', 'fail' => '❌'];
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
 <title>ศรีโค้ดบูรณ์ · ทดสอบระบบ</title>
 <link rel="preload" href="/assets/fonts/IBMPlexSansThai-400-thai.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/assets/fonts/ChakraPetch-700-thai.woff2" as="font" type="font/woff2" crossorigin>

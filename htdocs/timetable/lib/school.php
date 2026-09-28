@@ -30,5 +30,15 @@ function validate_logo(string $dataUrl): array {
     $want = $m[1] === 'png' ? IMAGETYPE_PNG : IMAGETYPE_JPEG;
     if (!$info || $info[2] !== $want) return [null, 'ไฟล์ไม่ใช่รูปภาพที่ถูกต้อง'];
     if ($info[0] < 16 || $info[1] < 16 || $info[0] > LOGO_MAX_SIDE || $info[1] > LOGO_MAX_SIDE) return [null, 'ขนาดรูปต้องอยู่ระหว่าง 16–512 พิกเซล'];
+    // เข้ารหัสรูปใหม่ด้วย GD (ถ้ามี): ตัดข้อมูลแฝงท้ายไฟล์/chunk แปลก ๆ ทิ้ง เหลือแต่พิกเซล กันไฟล์ polyglot
+    if (function_exists('imagecreatefromstring')) {
+        $im = @imagecreatefromstring($bin);
+        if ($im === false) return [null, 'ไฟล์ไม่ใช่รูปภาพที่ถูกต้อง'];
+        ob_start();
+        if ($m[1] === 'png') { imagealphablending($im, false); imagesavealpha($im, true); imagepng($im, null, 9); }
+        else imagejpeg($im, null, 90);
+        $clean = (string) ob_get_clean();
+        if ($clean !== '' && strlen($clean) <= LOGO_MAX_BYTES) $bin = $clean;
+    }
     return ['data:image/' . $m[1] . ';base64,' . base64_encode($bin), null];
 }

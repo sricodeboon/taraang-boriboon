@@ -4,6 +4,8 @@
 import { store, idx, DAY_NAMES, lockAt, assignmentLabel } from './store.js';
 
 const PDFMAKE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.3.3/pdfmake.min.js';
+// SRI: ถ้าไฟล์บน CDN ถูกแก้ เบราว์เซอร์จะไม่รัน (เปลี่ยนเวอร์ชันต้องเปลี่ยน hash ด้วย — ดูได้จาก cdnjs.com)
+const PDFMAKE_SRI = 'sha512-EkS5jkn3vXRWIdphIy51xskMZggNip3Or8kpe/FlM5XaQeiK2GZJ9OwrIEbXl6txKWsHNtm4OXtxzkkz41Mspw==';
 const FOOT = 'จัดด้วย ตารางบริบูรณ์ · sricodeboon.infinityfreeapp.com/timetable';
 const INK = '#0F2438', MUTED = '#5B6B7A', LINE = '#C9D2DC', HEAD = '#EEF2F6', BRK = '#F4F5F7', LOCK = '#E9E6F2';
 
@@ -14,6 +16,8 @@ function loadPdfMake() {
   loading ??= new Promise((ok, fail) => {
     const s = document.createElement('script');
     s.src = PDFMAKE_URL;
+    s.integrity = PDFMAKE_SRI;
+    s.crossOrigin = 'anonymous';
     s.onload = () => {
       const font = (f) => new URL('assets/fonts/' + f, location.href).href;
       window.pdfMake.fonts = { Plex: { normal: font('IBMPlexSansThai-Regular.ttf'), bold: font('IBMPlexSansThai-SemiBold.ttf') } };

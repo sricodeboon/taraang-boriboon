@@ -1,12 +1,39 @@
-# กันไม่ให้เปิดไฟล์ตั้งค่าและไฟล์ซ่อนผ่านเว็บ
-<FilesMatch "^(config\.php|config\.sample\.php|\..*)$">
+# กันไม่ให้เปิดไฟล์ตั้งค่า ไฟล์ซ่อน และไฟล์ที่ไม่ควรอยู่บนเว็บ (มีผลกับทุกโฟลเดอร์ย่อย)
+# - .md/.zip/.sqlite/.bak/.sh/.py/.sql/.log/composer.* = เอกสารภายใน ไฟล์สำรอง สคริปต์ build ฐานข้อมูล
+# - ห้ามใส่ .mjs/.js/.txt (dpa ใช้ vendor/*.mjs และ llms.txt/robots.txt ต้องเปิดได้)
+<FilesMatch "^(config\.php|config\.sample\.php|composer\.(json|lock|phar)|\..*|.*\.(md|zip|sqlite.*|db|bak|old|orig|swp|sh|py|sql|log|ini|dist)|.*~)$">
     Require all denied
 </FilesMatch>
 
 Options -Indexes
 
+# บังคับ HTTPS (เดิม http:// เปิดได้ และคุกกี้ session ของ timetable ไม่มี flag secure เมื่อเข้าทาง http)
+# เช็กทั้ง %{HTTPS} และ X-Forwarded-Proto เพราะโฮสต์มี proxy (openresty) อยู่หน้า Apache — redirect เฉพาะเมื่อทั้งสองบอกว่าไม่ใช่ https กันวนลูป
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !https [NC]
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+    # โฟลเดอร์ซ่อน (.git/ .github/ ฯลฯ) — FilesMatch ด้านบนจับได้แค่ชื่อไฟล์ ไม่จับชื่อโฟลเดอร์ (ยกเว้น .well-known สำหรับ SSL)
+    RewriteRule (^|/)\.(?!well-known/) - [F]
+</IfModule>
+
 # หน้าไม่พบ: ตอบ 404 จริง (ไม่ redirect ไปหน้า error ของโฮสต์) — สำคัญต่อ SEO และ Lighthouse
 ErrorDocument 404 /404.html
+# ไฟล์ที่ถูกกัน: ตอบ 403 จริงด้วยหน้าของเราเอง (เดิม redirect 302 ไป errors.infinityfree.net)
+ErrorDocument 403 /404.html
+
+# Security headers พื้นฐานทั้งเว็บ
+# ใช้ setifempty (ตาราง onsuccess ไม่ใช่ always) → ถ้า PHP ใน timetable/ kilasi/ ตั้ง header ชื่อเดียวกันเอง (เช่น X-Frame-Options: DENY, HSTS 180 วัน)
+# ค่าจาก PHP ชนะ ไม่เกิด header ซ้ำ 2 ค่า · CSP ไม่ตั้งที่นี่ (แต่ละแอปตั้งเองใน PHP ตามที่ใช้จริง)
+<IfModule mod_headers.c>
+    Header setifempty X-Content-Type-Options "nosniff"
+    Header setifempty X-Frame-Options "SAMEORIGIN"
+    Header setifempty Referrer-Policy "strict-origin-when-cross-origin"
+    Header setifempty Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+    # HSTS เริ่มสั้น 1 วันก่อน ถ้าทุกส่วนใช้ https ได้ครบค่อยขยายเป็น 15552000 (180 วัน)
+    Header setifempty Strict-Transport-Security "max-age=86400"
+</IfModule>
 
 # บีบอัดและแคชไฟล์คงที่ (ครอบ IfModule ไว้ ถ้าโฮสต์ไม่มีโมดูลก็ไม่พัง)
 <IfModule mod_deflate.c>

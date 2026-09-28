@@ -3,3 +3,12 @@
     Require all denied
 </FilesMatch>
 Options -Indexes
+
+# ไฟล์/โฟลเดอร์ซ่อนทุกระดับ (.git/ .env .DS_Store) — FilesMatch ของ htdocs กันได้แค่ชื่อไฟล์ ไม่กันไฟล์ข้างในโฟลเดอร์ .git
+RedirectMatch 404 /\.
+
+# header ความปลอดภัยของไฟล์คงที่ (หน้า PHP ส่งเองจาก lib/bootstrap.php รวม CSP)
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

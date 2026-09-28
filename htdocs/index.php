@@ -3,6 +3,8 @@ declare(strict_types=1);
 date_default_timezone_set('Asia/Bangkok');
 // บีบอัด HTML/JSON ด้วย gzip (โฮสต์ฟรีบางที่ไม่บีบให้ และ php -S ไม่บีบเลย) — ob_gzhandler ดู Accept-Encoding เอง
 if (PHP_SAPI !== 'cli' && extension_loaded('zlib') && !ini_get('zlib.output_compression')) ob_start('ob_gzhandler');
+// CSP: หน้านี้ใช้แค่ไฟล์ในเว็บเดียวกัน (mind.js, ฟอนต์, รูป) + <style> inline — ไม่มี inline script จึงห้าม script อื่นทั้งหมด
+header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'");
 
 $services = [
     ['เว็บไซต์', 'ร้านค้า ธุรกิจ หน่วยงาน เปิดบนมือถือได้สวย'],
