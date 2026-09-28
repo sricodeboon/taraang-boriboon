@@ -46,7 +46,7 @@ page_head('ผู้ดูแลระบบ · ตารางบริบู�
     '<meta name="robots" content="noindex, nofollow"><style>' . file_get_contents(APP_ROOT . '/assets/admin.css') . '</style>',
     'หน้าผู้ดูแลระบบตารางบริบูรณ์');
 ?>
-<header class="adm-bar">
+<header class="bar adm-top">
   <?= brand_html('app.php') ?>
   <span class="adm-tag">ผู้ดูแลระบบ</span>
   <nav class="adm-nav">
@@ -55,28 +55,34 @@ page_head('ผู้ดูแลระบบ · ตารางบริบู�
   </nav>
 </header>
 
-<main class="wrap adm">
-  <section aria-labelledby="h-sum">
-    <h1 id="h-sum" class="adm-h1">ภาพรวม <small class="muted">ณ <?= h(th_datetime(now())) ?> น. (เวลาไทย)</small></h1>
-    <div class="tiles">
-      <div class="tile"><b><?= number_format($sum['schools']) ?></b><span>โรงเรียนจริง</span><i>ไม่นับโหมดทดลองและบัญชีแอดมิน</i></div>
-      <div class="tile"><b><?= number_format($sum['users']) ?></b><span>ผู้ใช้จริง</span><i>ยังไม่มีโรงเรียน <?= number_format($sum['no_school']) ?> คน</i></div>
-      <div class="tile t-blue"><b><?= number_format($sum['new1']) ?> <small>/ <?= number_format($sum['new7']) ?></small></b><span>สมัครใหม่ 24 ชม. / 7 วัน</span></div>
-      <div class="tile t-blue"><b><?= number_format($sum['active1']) ?></b><span>โรงเรียนที่บันทึกใน 24 ชม.</span></div>
-      <div class="tile t-gold"><b><?= number_format($sum['guests']) ?></b><span>โรงเรียนทดลองค้างอยู่</span><i><?= $sum['guest_oldest'] ? 'เก่าสุด ' . h(th_ago($sum['guest_oldest'])) : 'ลบเองหลัง 48 ชม.' ?></i></div>
-      <div class="tile"><b><?= h(fmt_bytes($sum['db_bytes'])) ?></b><span>ขนาดไฟล์ฐานข้อมูล</span></div>
-      <div class="tile"><b><?= number_format($sum['rate_h1']) ?> <small>/ <?= number_format($sum['rate_d1']) ?></small></b><span>rate_hits 1 ชม. / 24 ชม.</span><i>การกด "ลองใช้ทันที"</i></div>
+<main class="adm">
+  <section aria-labelledby="h-sum" class="adm-head">
+    <div class="adm-title">
+      <h1 id="h-sum">ภาพรวม</h1>
+      <span class="muted">ณ <?= h(th_datetime(now())) ?> น.</span>
     </div>
+    <dl class="kpi">
+      <div><dt>โรงเรียนจริง</dt><dd><?= number_format($sum['schools']) ?></dd><small>ไม่นับทดลองและแอดมิน</small></div>
+      <div><dt>ผู้ใช้จริง</dt><dd><?= number_format($sum['users']) ?></dd><small>ยังไม่มีโรงเรียน <?= number_format($sum['no_school']) ?> คน</small></div>
+      <div><dt>สมัครใหม่</dt><dd><?= number_format($sum['new7']) ?></dd><small>7 วัน · วันนี้ <?= number_format($sum['new1']) ?></small></div>
+      <div><dt>ใช้งานใน 24 ชม.</dt><dd><?= number_format($sum['active1']) ?></dd><small>โรงเรียนที่บันทึก</small></div>
+    </dl>
+    <p class="sys muted">
+      <span>ทดลองค้าง <b><?= number_format($sum['guests']) ?></b><?= $sum['guest_oldest'] ? ' · เก่าสุด ' . h(th_ago($sum['guest_oldest'])) : '' ?></span>
+      <span>ฐานข้อมูล <b><?= h(fmt_bytes($sum['db_bytes'])) ?></b></span>
+      <span>ลองใช้ทันที <b><?= number_format($sum['rate_h1']) ?></b> / ชม. · <b><?= number_format($sum['rate_d1']) ?></b> / วัน</span>
+    </p>
   </section>
 
-  <section aria-labelledby="h-care" class="adm-sec">
-    <h2 id="h-care">ต้องดูแล <small class="muted">เรียงตามความสำคัญ</small></h2>
-    <div class="chips" role="list">
-      <a role="listitem" class="chip<?= $prio === 0 ? ' on' : '' ?>" href="<?= h(admin_url(['p' => null])) ?>">ทั้งหมด <b><?= number_format(array_sum($list['counts'])) ?></b></a>
+  <div class="dash">
+  <section aria-labelledby="h-care" class="panel">
+    <div class="panel-h"><h2 id="h-care">ต้องดูแล</h2><span class="muted">เรียงตามความสำคัญ</span></div>
+    <nav class="seg adm-seg" aria-label="กรองตามความสำคัญ">
+      <a class="<?= $prio === 0 ? 'on' : '' ?>" href="<?= h(admin_url(['p' => null])) ?>"<?= $prio === 0 ? ' aria-current="page"' : '' ?>>ทั้งหมด <b><?= number_format(array_sum($list['counts'])) ?></b></a>
       <?php foreach (ADMIN_PRIO as $k => [$label, $tip, $cls]): ?>
-        <a role="listitem" class="chip <?= $cls ?><?= $prio === $k ? ' on' : '' ?>" href="<?= h(admin_url(['p' => $k])) ?>" title="<?= h($tip) ?>"><span class="dot"></span><?= $k ?>. <?= h($label) ?> <b><?= number_format($list['counts'][$k]) ?></b></a>
+        <a class="<?= $prio === $k ? 'on' : '' ?>" href="<?= h(admin_url(['p' => $k])) ?>" title="<?= h($tip) ?>"<?= $prio === $k ? ' aria-current="page"' : '' ?>><?= h($label) ?> <b><?= number_format($list['counts'][$k]) ?></b></a>
       <?php endforeach; ?>
-    </div>
+    </nav>
 
     <form class="tools" method="get" action="admin.php" id="adm-form">
       <?php if ($prio): ?><input type="hidden" name="p" value="<?= $prio ?>"><?php endif; ?>
@@ -92,7 +98,7 @@ page_head('ผู้ดูแลระบบ · ตารางบริบู�
     <?php if (!$list['rows']): ?>
       <p class="empty">ไม่มีรายการ<?= $q !== '' ? 'ที่ตรงกับ “' . h($q) . '”' : '' ?></p>
     <?php else: ?>
-    <div class="scroll-x frame">
+    <div class="frame">
       <table class="table adm-table" id="care">
         <thead><tr>
           <th><button type="button" data-k="prio" data-t="n">ความสำคัญ</button></th>
@@ -123,7 +129,7 @@ page_head('ผู้ดูแลระบบ · ตารางบริบู�
             $search = mb_strtolower(implode(' ', [$r['name'], $r['email'], $r['school'], $r['school_code'], $r['tambon'], $r['amphoe'], $r['province']]));
         ?>
           <tr class="<?= $pcls ?><?= $r['is_adm'] ? ' is-adm' : '' ?><?= $isGuest ? ' is-guest' : '' ?>" data-q="<?= h($search) ?>">
-            <td data-v="<?= $p ?>"><span class="prio <?= $pcls ?>" title="<?= h($ptip) ?>"><span class="dot"></span><?= h($plabel) ?></span><?php if ($note): ?><small class="note"><?= h($note) ?></small><?php endif; ?></td>
+            <td data-v="<?= $p ?>"><span class="prio" title="<?= h($ptip) ?>"><i class="lv"><?= $p ?></i><?= h($plabel) ?></span><?php if ($note): ?><small class="note"><?= h($note) ?></small><?php endif; ?></td>
             <td data-v="<?= h(mb_strtolower((string) $r['name'])) ?>">
               <b class="who"><?= h($r['name'] ?: '(ไม่มีชื่อ)') ?></b>
               <span class="prov prov-<?= h($r['provider']) ?>"><?= h(PROVIDER_LABEL[$r['provider']] ?? $r['provider']) ?></span>
@@ -161,8 +167,8 @@ page_head('ผู้ดูแลระบบ · ตารางบริบู�
     <?php endif; ?>
   </section>
 
-  <section aria-labelledby="h-geo" class="adm-sec">
-    <h2 id="h-geo">จังหวัด / อำเภอ <small class="muted"><?= number_format(count($prov)) ?> จังหวัด · <?= number_format(count($geo)) ?> อำเภอ</small></h2>
+  <aside aria-labelledby="h-geo" class="panel side">
+    <div class="panel-h"><h2 id="h-geo">จังหวัด / อำเภอ</h2><span class="muted"><?= number_format(count($prov)) ?> จังหวัด · <?= number_format(count($geo)) ?> อำเภอ</span></div>
     <?php if (!$prov): ?><p class="empty">ยังไม่มีโรงเรียนจริง</p><?php else: ?>
     <div class="geo">
       <?php $max = max(array_column($prov, 'n')); foreach ($prov as $name => $pv): ?>
@@ -173,7 +179,8 @@ page_head('ผู้ดูแลระบบ · ตารางบริบู�
       <?php endforeach; ?>
     </div>
     <?php endif; ?>
-  </section>
+  </aside>
+  </div>
 
   <p class="muted foot">อ่านอย่างเดียว · เวลาทั้งหมดเป็นเวลาไทย · ประมวลผล <?= $ms ?> ms</p>
 </main>
