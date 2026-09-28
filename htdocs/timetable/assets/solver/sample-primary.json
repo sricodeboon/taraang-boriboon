@@ -185,7 +185,7 @@
   },
   {
    "id": "s4",
-   "code": "ว11103",
+   "code": "ว11201",
    "name": "วิทยาการคำนวณ ป.1",
    "color": "#8FA8C8"
   },
@@ -257,7 +257,7 @@
   },
   {
    "id": "s16",
-   "code": "ว12103",
+   "code": "ว12201",
    "name": "วิทยาการคำนวณ ป.2",
    "color": "#8FA8C8"
   },
@@ -329,7 +329,7 @@
   },
   {
    "id": "s28",
-   "code": "ว13103",
+   "code": "ว13201",
    "name": "วิทยาการคำนวณ ป.3",
    "color": "#8FA8C8"
   },
@@ -396,7 +396,7 @@
   {
    "id": "s39",
    "code": "ว14101",
-   "name": "วิทยาศาสตร์และเทคโนโลยี ป.4",
+   "name": "วิทยาศาสตร์ ป.4",
    "color": "#B9A7E8"
   },
   {
@@ -468,7 +468,7 @@
   {
    "id": "s51",
    "code": "ว15101",
-   "name": "วิทยาศาสตร์และเทคโนโลยี ป.5",
+   "name": "วิทยาศาสตร์ ป.5",
    "color": "#B9A7E8"
   },
   {
@@ -540,7 +540,7 @@
   {
    "id": "s63",
    "code": "ว16101",
-   "name": "วิทยาศาสตร์และเทคโนโลยี ป.6",
+   "name": "วิทยาศาสตร์ ป.6",
    "color": "#B9A7E8"
   },
   {
@@ -659,7 +659,7 @@
    "classId": "c1",
    "teacherId": "t9",
    "roomId": null,
-   "perWeek": 2,
+   "perWeek": 1,
    "doubles": 0
   },
   {
@@ -668,7 +668,7 @@
    "classId": "c1",
    "teacherId": "t1",
    "roomId": null,
-   "perWeek": 2,
+   "perWeek": 1,
    "doubles": 0
   },
   {
@@ -686,7 +686,7 @@
    "classId": "c1",
    "teacherId": "t8",
    "roomId": null,
-   "perWeek": 1,
+   "perWeek": 3,
    "doubles": 0
   },
   {
@@ -702,7 +702,7 @@
    "id": "a12",
    "subjectId": "s12",
    "classId": "c1",
-   "teacherId": "t8",
+   "teacherId": "t1",
    "roomId": null,
    "perWeek": 2,
    "doubles": 0
@@ -767,7 +767,7 @@
    "classId": "c2",
    "teacherId": "t9",
    "roomId": null,
-   "perWeek": 2,
+   "perWeek": 1,
    "doubles": 0
   },
   {
@@ -776,7 +776,7 @@
    "classId": "c2",
    "teacherId": "t2",
    "roomId": null,
-   "perWeek": 2,
+   "perWeek": 1,
    "doubles": 0
   },
   {
@@ -794,7 +794,7 @@
    "classId": "c2",
    "teacherId": "t8",
    "roomId": null,
-   "perWeek": 1,
+   "perWeek": 3,
    "doubles": 0
   },
   {
@@ -810,7 +810,7 @@
    "id": "a24",
    "subjectId": "s24",
    "classId": "c2",
-   "teacherId": "t8",
+   "teacherId": "t2",
    "roomId": null,
    "perWeek": 2,
    "doubles": 0
@@ -875,7 +875,7 @@
    "classId": "c3",
    "teacherId": "t9",
    "roomId": null,
-   "perWeek": 2,
+   "perWeek": 1,
    "doubles": 0
   },
   {
@@ -884,7 +884,7 @@
    "classId": "c3",
    "teacherId": "t3",
    "roomId": null,
-   "perWeek": 2,
+   "perWeek": 1,
    "doubles": 0
   },
   {
@@ -902,7 +902,7 @@
    "classId": "c3",
    "teacherId": "t8",
    "roomId": null,
-   "perWeek": 1,
+   "perWeek": 3,
    "doubles": 0
   },
   {
@@ -918,7 +918,7 @@
    "id": "a36",
    "subjectId": "s36",
    "classId": "c3",
-   "teacherId": "t8",
+   "teacherId": "t3",
    "roomId": null,
    "perWeek": 2,
    "doubles": 0
@@ -1026,7 +1026,7 @@
    "id": "a48",
    "subjectId": "s48",
    "classId": "c4",
-   "teacherId": "t8",
+   "teacherId": "t4",
    "roomId": null,
    "perWeek": 2,
    "doubles": 0
@@ -1134,7 +1134,7 @@
    "id": "a60",
    "subjectId": "s60",
    "classId": "c5",
-   "teacherId": "t8",
+   "teacherId": "t5",
    "roomId": null,
    "perWeek": 2,
    "doubles": 0
@@ -1242,7 +1242,7 @@
    "id": "a72",
    "subjectId": "s72",
    "classId": "c6",
-   "teacherId": "t8",
+   "teacherId": "t6",
    "roomId": null,
    "perWeek": 2,
    "doubles": 0

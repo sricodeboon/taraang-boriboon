@@ -3,7 +3,8 @@ import {
   store, idx, DAY_NAMES, remaining, isBreak, lockAt, teacherUnavailable, placementsAt, whyCannotPlace,
   localValidate, CONFLICT_TEXT, esc, assignmentLabel,
 } from './store.js';
-import { toast } from './ui.js';
+import { gridModel, orientation, ORIENTS } from './rules.js';
+import * as notify from './notify.js';
 
 let view = 'class';
 let selected = { class: null, teacher: null, room: null };
@@ -13,6 +14,7 @@ let solving = null;          // Worker ที่กำลังจัด
 let lastSolve = null;        // { termId, sec, placed, unplaced[], warnings[], error } ผลการจัดครั้งล่าสุด แสดงค้างเหนือตาราง
 let hideReport = false;      // ผู้ใช้กดปิดกล่องรายงานผลการจัด
 let root = null;
+let busy = null;             // toast "กำลังจัดตาราง" (notify.loading)
 
 // validate() จาก solver.js (60KB) โหลดหลังหน้าแสดงผลแล้ว ระหว่างนั้นใช้ localValidate() ใน store.js
 const loadValidator = () => import('./solver/solver.js').then((m) => { if (typeof m.validate === 'function') { validator = m.validate; if (root) render(root); } }).catch(() => {});
@@ -85,12 +87,13 @@ export function render(el) {
       <div class="seg" role="group" aria-label="มุมมอง">
         ${['class', 'teacher', 'room'].map((v) => `<button data-view="${v}" aria-pressed="${v === view}">${{ class: 'ห้องเรียน', teacher: 'ครู', room: 'ห้องพิเศษ' }[v]}</button>`).join('')}
       </div>
+      <div class="orient" role="group" aria-label="แนวตาราง"><span class="lbl">แนวตาราง</span>
+        <div class="seg orient-seg">${ORIENTS.map(([k, t]) => `<button data-orient="${k}" aria-pressed="${k === orientation(d)}" title="${k === 'days' ? 'แถว = วัน คอลัมน์ = คาบ' : 'แถว = คาบ คอลัมน์ = วัน'}">${t}</button>`).join('')}</div></div>
       <select id="ent-select" class="input input-sm" aria-label="เลือก${noun}">
         ${list.map((e) => `<option value="${esc(e.id)}" ${e.id === id ? 'selected' : ''}>${esc(e.name)}</option>`).join('') || `<option>ยังไม่มี${noun}</option>`}
       </select>
       <span class="pill ${hard ? 'warn' : 'ok'}" title="จำนวนจุดที่ชนทั้งโรงเรียน">${hard ? `ชน ${hard} จุด` : 'ไม่มีจุดชน'}</span>
       <span class="pill">เหลือจัด ${totalLeft} คาบ</span>
-      ${lastSolve?.sec ? `<span class="pill" title="เวลาที่ใช้จัดอัตโนมัติครั้งล่าสุด">จัดล่าสุด ${lastSolve.sec} วินาที</span>` : ''}
       <span class="spacer"></span>
       <div class="progress" id="solve-progress" hidden><i></i></div>
       <button class="btn btn-sm" id="clear-auto" title="ลบคาบที่ไม่ได้ปักหมุดทั้งโรงเรียน">ล้างที่ไม่ปักหมุด</button>
@@ -106,16 +109,22 @@ export function render(el) {
     </div>`;
 
   el.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => { view = b.dataset.view; render(el); }));
+  el.querySelectorAll('[data-orient]').forEach((b) => b.addEventListener('click', () => {
+    if (orientation(d) === b.dataset.orient) return;
+    d.settings.orientation = b.dataset.orient;
+    store.commit('settings'); // วาดใหม่ผ่าน onChange + บันทึกเป็นค่าของภาคเรียน (ใช้กับ PDF/Excel ด้วย)
+  }));
   el.querySelector('#ent-select')?.addEventListener('change', (e) => { selected[view] = e.target.value; render(el); });
   el.querySelector('#auto-solve').addEventListener('click', autoSolve);
   el.querySelector('#auto-solve-2')?.addEventListener('click', autoSolve);
   el.querySelector('#solve-report-close')?.addEventListener('click', () => { hideReport = true; render(el); });
   el.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => gotoData(b.dataset.goto)));
   el.querySelector('#clear-auto').addEventListener('click', () => {
-    const before = d.placements.length;
+    const gone = d.placements.filter((p) => !p.pinned);
+    if (!gone.length) { notify.info('ไม่มีคาบที่ไม่ได้ปักหมุด'); return; }
     d.placements = d.placements.filter((p) => p.pinned);
     store.commit('clear');
-    toast(`ลบ ${before - d.placements.length} คาบที่ไม่ได้ปักหมุด`);
+    notify.action(`ล้าง ${gone.length} คาบที่ไม่ได้ปักหมุดแล้ว`, 'เลิกทำ', () => { store.doc.placements.push(...gone); store.commit('undo'); notify.ok('คืนคาบที่ล้างแล้ว'); });
   });
   bindDrag(el);
 }
@@ -136,16 +145,23 @@ function paletteHTML(id) {
 
 function gridHTML(id) {
   const d = store.doc;
-  const days = [...Array(d.term.days).keys()];
-  let h = `<table class="tt"><thead><tr><th>คาบ</th>${days.map((i) => `<th>${DAY_NAMES[i]}</th>`).join('')}</tr></thead><tbody>`;
-  d.term.periods.forEach((p, pi) => {
-    const tm = p.start && p.end ? `${esc(p.start)}–${esc(p.end)}` : '';
-    if (p.type === 'break') {
-      h += `<tr class="brk"><th><span class="lbl">${esc(p.label || 'พัก')}</span><span class="tm">${tm}</span></th><td colspan="${days.length}">${esc(p.label || 'พัก')}</td></tr>`;
+  const g = gridModel(d);
+  const tm = (p) => (p.start && p.end ? `${esc(p.start)}–${esc(p.end)}` : '');
+  const headOf = (x) => (x.p ? `<span class="lbl">${x.brk ? esc(x.p.label || 'พัก') : 'คาบ ' + esc(x.p.label || x.period + 1)}</span><span class="tm">${tm(x.p)}</span>` : esc(x.name));
+  let h = `<table class="tt ${g.orient === 'days' ? 'by-day' : 'by-period'}" data-orient="${g.orient}"><thead><tr><th>${g.corner}</th>${g.cols.map((c) => (c.brk
+    ? `<th class="brk-col" title="${esc(c.p.label || 'พัก')} ${tm(c.p)}"></th>` : `<th>${headOf(c)}</th>`)).join('')}</tr></thead><tbody>`;
+  g.rows.forEach((r, ri) => {
+    if (r.brk) { // คาบเรียงลงล่าง: ช่องพักเต็มแถว
+      h += `<tr class="brk"><th>${headOf(r)}</th><td colspan="${g.cols.length}">${esc(r.p.label || 'พัก')}</td></tr>`;
       return;
     }
-    h += `<tr><th><span class="lbl">คาบ ${esc(p.label || pi + 1)}</span><span class="tm">${tm}</span></th>`;
-    for (const day of days) {
+    h += `<tr><th>${headOf(r)}</th>`;
+    for (const c of g.cols) {
+      if (c.brk) { // วันเรียงลงล่าง: ช่องพักเต็มคอลัมน์ (วาดครั้งเดียวที่แถวแรก)
+        if (ri === 0) h += `<td class="brk-col" rowspan="${g.rows.length}"><span>${esc(c.p.label || 'พัก')}</span></td>`;
+        continue;
+      }
+      const { day, period: pi } = g.at(r, c);
       const lk = view === 'class' && id ? lockAt(id, day, pi) : null;
       const cells = id ? placementsAt(view, id, day, pi) : [];
       const unav = view === 'teacher' && id && teacherUnavailable(id, day, pi);
@@ -155,7 +171,7 @@ function gridHTML(id) {
         const a = idx.asg.get(pl.assignmentId), L = assignmentLabel(a);
         const bad = cellConflict([pl], day, pi);
         const sub = view === 'class' ? (L.tch?.short || L.tch?.name || '') : view === 'teacher' ? (L.cls?.name || '') : `${L.cls?.name || ''} · ${L.tch?.short || ''}`;
-        const tip = bad.length ? bad.map((c) => CONFLICT_TEXT[c.type] || c.type).join(', ') : `${L.code} ${L.name}`;
+        const tip = bad.length ? bad.map((x) => CONFLICT_TEXT[x.type] || x.type).join(', ') : `${L.code} ${L.name}`;
         h += `<div class="cell ${bad.length ? 'conflict' : ''}" data-pl="${d.placements.indexOf(pl)}" style="--c:${esc(L.color)}" title="${esc(tip)}">
           ${pl.pinned ? '<span class="pin" title="ปักหมุด">📌</span>' : ''}<b>${esc(L.name)}</b><span>${esc(sub)}</span>${L.room && view !== 'room' ? `<span>${esc(L.room.name)}</span>` : ''}</div>`;
       }
@@ -187,7 +203,7 @@ function bindDrag(el) {
   el.querySelectorAll('.chip[data-asg]').forEach((c) => c.addEventListener('pointerdown', (e) => {
     const a = idx.asg.get(c.dataset.asg);
     if (a && remaining(a) > 0) start(e, { kind: 'new', a }, c);
-    else if (a) toast('วิชานี้จัดครบแล้ว');
+    else if (a) notify.info('วิชานี้จัดครบแล้ว');
   }));
   el.querySelectorAll('.cell[data-pl]').forEach((c) => c.addEventListener('pointerdown', (e) => {
     const pl = store.doc.placements[+c.dataset.pl];
@@ -232,7 +248,7 @@ function bindDrag(el) {
     if (!td) return;
     const day = +td.dataset.day, period = +td.dataset.period;
     const why = whyCannotPlace(dr.payload.a, day, period, dr.payload.pl || null);
-    if (why && !e.shiftKey) { toast(`วางไม่ได้: ${why} (กด Shift ค้างเพื่อวางทับ)`); return; }
+    if (why && !e.shiftKey) { notify.warn(`วางไม่ได้: ${why} (กด Shift ค้างเพื่อวางทับ)`, 4500); return; }
     if (dr.payload.kind === 'new') store.doc.placements.push({ assignmentId: dr.payload.a.id, day, period, pinned: true });
     else { dr.payload.pl.day = day; dr.payload.pl.period = period; dr.payload.pl.pinned = true; }
     store.commit('place');
@@ -394,7 +410,7 @@ function workerURL() {
 }
 
 function autoSolve() {
-  if (solving) { solving.terminate(); solving = null; render(root); toast('หยุดการจัดอัตโนมัติ'); return; }
+  if (solving) { solving.terminate(); solving = null; busy?.close(); render(root); notify.info('หยุดการจัดอัตโนมัติแล้ว'); return; }
   const input = solverInput(true);
   const skipped = store.doc.assignments.length - input.assignments.length;
   hideReport = false;
@@ -402,7 +418,7 @@ function autoSolve() {
     lastSolve = { termId: store.termId, error: store.doc.assignments.length
       ? 'การสอนทุกรายการยังไม่ได้เลือกห้องเรียนหรือครู ไปที่แท็บข้อมูล → การสอน แล้วเลือกให้ครบ'
       : 'ยังไม่มีการสอนให้จัด ไปที่แท็บข้อมูล → การสอน เพื่อจับคู่วิชา ห้อง และครูก่อน' };
-    render(root); toast(lastSolve.error, 6000); return;
+    render(root); notify.warn(lastSolve.error, 7000); return;
   }
   const t0 = performance.now(); // นับตั้งแต่กดจนได้ผล (รวมเวลาเปิด worker) = เวลาที่ผู้ใช้รอจริง
   const opts = SOLVE_OPTS();
@@ -413,7 +429,7 @@ function autoSolve() {
   render(root);
   const bar = root.querySelector('#solve-progress');
   bar.hidden = false;
-  toast('กำลังจัดตาราง… ปักหมุดไว้จะไม่ถูกย้าย');
+  busy = notify.loading('กำลังจัดตาราง… คาบที่ปักหมุดไว้จะไม่ถูกย้าย');
   let heard = false;
   const stop = () => { clearTimeout(silent); clearTimeout(hard); worker.terminate(); if (solving === worker) solving = null; };
   // เบราว์เซอร์ที่ไม่รองรับ module worker บางตัวไม่ error แต่เงียบไปเลย → 8 วิไม่มีข่าว = จัดในหน้าแทน
@@ -440,7 +456,8 @@ function autoSolve() {
 /** สำรอง: จัดใน main thread (ช้ากว่าเล็กน้อยและหน้าค้างระหว่างจัด) ใช้เมื่อเบราว์เซอร์เปิด module worker ไม่ได้ */
 async function solveInPage(input, opts, t0, skipped) {
   solving = null;
-  toast('เบราว์เซอร์นี้จัดเบื้องหลังไม่ได้ กำลังจัดในหน้า หน้าจออาจค้างสักครู่…', 6000);
+  busy?.close();
+  busy = notify.loading('กำลังจัดตาราง… (เบราว์เซอร์นี้จัดเบื้องหลังไม่ได้ หน้าจออาจค้างสักครู่)');
   try {
     const m = await import('./solver/solver.js');
     await new Promise((r) => setTimeout(r, 50)); // ให้ toast แสดงก่อนหน้าค้าง
@@ -453,10 +470,11 @@ async function solveInPage(input, opts, t0, skipped) {
 
 function failSolve(message) {
   solving = null;
+  busy?.close(); busy = null;
   lastSolve = { termId: store.termId, error: message };
   hideReport = false;
   if (root) render(root);
-  toast('จัดอัตโนมัติไม่สำเร็จ ดูรายละเอียดเหนือตาราง', 6000);
+  notify.alertBox('จัดอัตโนมัติไม่สำเร็จ', message, 'error');
 }
 
 function applyResult(result, t0, skipped) {
@@ -472,6 +490,26 @@ function applyResult(result, t0, skipped) {
   hideReport = false;
   store.commit('solve');
   const n = store.doc.placements.length;
-  toast(!miss ? `จัดครบทุกคาบแล้ว ใช้เวลา ${sec} วินาที`
-    : `${n ? `จัดได้ ${n} คาบ · ` : 'ยังวางไม่ได้เลย · '}วางไม่ลง ${miss} คาบ — ดูสาเหตุและวิธีแก้เหนือตาราง`, miss ? 7000 : 3200);
+  busy?.close(); busy = null;
+  if (!miss && !skipped) { notify.ok(`จัดเสร็จ ${n} คาบ ไม่มีคาบชน · ใช้เวลา ${sec} วินาที`, 4500); return; }
+  solveSummary(n, miss, skipped);
+}
+
+/** จัดไม่ครบ: กล่องสรุปสาเหตุหลัก 3 อันดับ + ปุ่มไปแก้ (รายละเอียดทั้งหมดค้างอยู่เหนือตาราง) */
+async function solveSummary(n, miss, skipped) {
+  const groups = new Map();
+  for (const u of lastSolve.unplaced) groups.set(u.reason, (groups.get(u.reason) || 0) + (u.remaining || 0));
+  const top = [...groups].sort((x, y) => y[1] - x[1]).slice(0, 3);
+  const firstGoto = top.length ? fixFor(top[0][0])[1] : skipped ? 'assignments' : null;
+  const items = [
+    ...(skipped ? [`<li>การสอน ${skipped} รายการยังไม่ได้เลือกห้องเรียนหรือครู</li>`] : []),
+    ...top.map(([reason, k]) => `<li><b>${esc(reason)}</b> — ${k} คาบ<br><span class="muted">วิธีแก้: ${esc(fixFor(reason)[0])}</span></li>`),
+  ].join('');
+  const pick = await notify.choose({
+    title: n ? `จัดได้ ${n} คาบ · วางไม่ลง ${miss} คาบ` : `ยังวางคาบไม่ได้เลย (วางไม่ลง ${miss} คาบ)`, icon: 'warning',
+    html: `<p style="margin:0">สาเหตุหลัก${groups.size > 3 ? ` (จาก ${groups.size} สาเหตุ)` : ''}:</p><ul>${items}</ul><p class="muted" style="margin:8px 0 0">รายละเอียดทั้งหมดอยู่เหนือตาราง · คาบที่วางได้แล้วยังอยู่</p>`,
+    ok: 'ดูรายละเอียด', deny: firstGoto ? `ไปแก้ที่ ข้อมูล → ${SEC_NAME[firstGoto]}` : undefined, cancel: 'ปิด',
+  });
+  if (pick === 'deny') gotoData(firstGoto);
+  else if (pick === 'confirm') root?.querySelector('.callout')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }

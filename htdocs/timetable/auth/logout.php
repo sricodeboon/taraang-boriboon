@@ -5,6 +5,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (current_user()) {
         csrf_check();
         logout_user();
+        flash('ออกจากระบบแล้ว', 'ok');
     }
 }
 redirect('index.php');

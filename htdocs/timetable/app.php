@@ -11,12 +11,18 @@ $v = fn(string $f) => @filemtime(APP_ROOT . '/' . $f);
 
 // import map: ทุกโมดูลได้ ?v=เวลาแก้ไฟล์ — อัปโหลดเวอร์ชันใหม่แล้วเบราว์เซอร์ไม่ใช้ไฟล์เก่าจากแคชปนกับของใหม่
 // (import './data.js' ภายในโมดูลถูกแมปผ่าน URL เต็มจึงได้เวอร์ชันด้วย · worker ใช้ import.meta.resolve() อ่านเวอร์ชันจาก map นี้)
-$mods = ['store.js', 'ui.js', 'board.js', 'data.js', 'periods.js', 'export.js', 'school.js', 'geo.js', 'curriculum.js', 'pdf.js', 'solver/solver.js', 'solver/solver.worker.js'];
+$mods = ['store.js', 'rules.js', 'notify.js', 'board.js', 'data.js', 'periods.js', 'export.js', 'school.js', 'geo.js', 'curriculum.js', 'pdf.js', 'solver/solver.js', 'solver/solver.worker.js'];
+$preloadN = 10; // ถึง curriculum.js (pdf.js/solver โหลดทีหลัง)
 $map = [];
 foreach ($mods as $m) $map['./assets/' . $m] = './assets/' . $m . '?v=' . $v('assets/' . $m);
 $importMap = '<script type="importmap" nonce="' . csp_nonce() . '">' . $js(['imports' => $map]) . '</script>';
 // ฝัง board.css และ preload โมดูลที่ใช้ตอนเปิดหน้า (ไม่ต้องรอ app.js โหลดเสร็จก่อนจึงค่อยเห็น import ถัดไป)
-$preload = implode('', array_map(fn($m) => '<link rel="modulepreload" href="' . h($map['./assets/' . $m]) . '">', array_slice($mods, 0, 9)));
+$preload = implode('', array_map(fn($m) => '<link rel="modulepreload" href="' . h($map['./assets/' . $m]) . '">', array_slice($mods, 0, $preloadN)));
+// รหัสวิชา → คาบ/สัปดาห์ตามหลักสูตรแกนกลาง (~4KB) ฝังมากับหน้า ใช้เติม subject.perWeek ให้ข้อมูลเก่า โดยไม่ต้องโหลด curriculum.json เพิ่ม (ประหยัด hits)
+$curMap = [];
+foreach ((json_decode((string) @file_get_contents(APP_ROOT . '/data/curriculum.json'), true)['levels'] ?? []) as $lv) {
+    foreach ($lv['subjects'] ?? [] as $cs) if (!empty($cs['code']) && (int) ($cs['perWeek'] ?? 0) > 0) $curMap[$cs['code']] = (int) $cs['perWeek'];
+}
 page_head('จัดตาราง · ' . $school['name'], '<style>' . file_get_contents(APP_ROOT . '/assets/board.css') . '</style>' . $importMap . $preload);
 ?>
 <div id="app" class="app">
@@ -53,6 +59,6 @@ page_head('จัดตาราง · ' . $school['name'], '<style>' . file_get
   </main>
   <div id="toast" class="toast" role="status" hidden></div>
 </div>
-<script nonce="<?= csp_nonce() ?>">window.TT = { csrf: <?= json_encode(csrf_token()) ?>, school: <?= $js(school_public($school)) ?>, owner: <?= is_owner($user) ? 'true' : 'false' ?>, flash: <?= $js(flash()) ?>, boot: <?= $js(['terms' => $bootTerms, 'term' => $bootTerm]) ?> };</script>
+<script nonce="<?= csp_nonce() ?>">window.TT = { csrf: <?= json_encode(csrf_token()) ?>, school: <?= $js(school_public($school)) ?>, owner: <?= is_owner($user) ? 'true' : 'false' ?>, flash: <?= $js(flash()) ?>, flashKind: <?= $js(flash_kind()) ?>, cur: <?= $js($curMap ?: new stdClass()) ?>, boot: <?= $js(['terms' => $bootTerms, 'term' => $bootTerm]) ?> };</script>
 <script type="module" nonce="<?= csp_nonce() ?>" src="assets/app.js?v=<?= $v('assets/app.js') ?>"></script>
 <?php page_foot();

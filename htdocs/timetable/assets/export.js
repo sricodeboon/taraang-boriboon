@@ -1,6 +1,7 @@
-// แท็บส่งออก: Excel (SheetJS), PDF (สร้างไฟล์ในเบราว์เซอร์ด้วย pdfmake ดู pdf.js), สำรอง/นำเข้า JSON
+// แท็บส่งออก: Excel (ExcelJS), PDF (สร้างไฟล์ในเบราว์เซอร์ด้วย pdfmake ดู pdf.js), สำรอง/นำเข้า JSON
 import { store, idx, DAY_NAMES, lockAt, esc, assignmentLabel } from './store.js';
-import { toast } from './ui.js';
+import { orientation, ORIENTS } from './rules.js';
+import * as notify from './notify.js';
 // pdf.js โหลดเมื่อกดส่งออกครั้งแรกเท่านั้น
 const pdfModule = () => import('./pdf.js');
 
@@ -10,7 +11,13 @@ let perPage = 1, paper = 'A4';
 export function render(el) {
   root = el;
   const d = store.doc;
-  el.innerHTML = `<div class="export-grid">
+  const o = orientation(d);
+  el.innerHTML = `<div class="card export-orient">
+      <div><b>แนวตารางรายห้อง / รายครู</b>
+        <p class="muted" style="margin:2px 0 0;font-size:.88rem">${o === 'days' ? 'วันเรียงลงล่าง: แถว = วัน (จันทร์–ศุกร์) คอลัมน์ = คาบ' : 'คาบเรียงลงล่าง: แถว = คาบ คอลัมน์ = วัน'} · ใช้กับกระดานจัดตาราง PDF และ Excel (ตารางรวมทั้งโรงเรียนเป็น แถว = ห้อง/ครู เสมอ)</p></div>
+      <div class="seg orient-seg" role="group" aria-label="แนวตาราง">${ORIENTS.map(([k, t]) => `<button data-orient="${k}" aria-pressed="${k === o}">${t}</button>`).join('')}</div>
+    </div>
+    <div class="export-grid">
     <div class="card">
       <h3 style="font-size:1.05rem">Excel (.xlsx)</h3>
       <p class="muted" style="margin:0">ชีตตารางรวมทั้งโรงเรียน ชีตรายห้อง ชีตรายครู และสรุปภาระสอน มีเส้นตาราง สีวิชา และโลโก้ พร้อมพิมพ์ A4 แนวนอน</p>
@@ -47,6 +54,12 @@ export function render(el) {
       </div>
     </div>
   </div>`;
+  el.querySelectorAll('[data-orient]').forEach((b) => b.addEventListener('click', () => {
+    if (orientation(d) === b.dataset.orient) return;
+    d.settings.orientation = b.dataset.orient;
+    store.commit('settings');
+    notify.ok(`เปลี่ยนเป็น “${b.textContent}” แล้ว`, 2500);
+  }));
   el.querySelector('#x-xlsx').addEventListener('click', exportXlsx);
   el.querySelectorAll('input[name=per]').forEach((r) => r.addEventListener('change', () => { perPage = +r.value; }));
   el.querySelectorAll('input[name=paper]').forEach((r) => r.addEventListener('change', () => { paper = r.value; }));
@@ -129,8 +142,52 @@ function pageSetup(ws, { fitHeight = 1, paper = 9 } = {}) {
   ws.headerFooter = { oddFooter: '&L&8จัดด้วย ตารางบริบูรณ์&R&8หน้า &P/&N' };
 }
 
-/** ตารางรายห้อง / รายครู หนึ่งชีต */
+/** ตารางรายห้อง / รายครู หนึ่งชีต ตามแนวที่เลือก */
 function entitySheet(wb, used, kind, e, logoId, tint) {
+  if (orientation(store.doc) === 'days') return entitySheetByDay(wb, used, kind, e, logoId, tint);
+  return entitySheetByPeriod(wb, used, kind, e, logoId, tint);
+}
+
+/** วันเรียงลงล่าง: แถว = วัน คอลัมน์ = คาบ · ช่องพักเป็นคอลัมน์แคบ (รวมช่องทุกวัน ข้อความตั้ง) */
+function entitySheetByDay(wb, used, kind, e, logoId, tint) {
+  const d = store.doc, days = d.term.days, P = d.term.periods;
+  const ws = wb.addWorksheet(sheetName(kind === 'class' ? e.name : 'ครู ' + (e.short || e.name), used));
+  ws.columns = [{ width: 12 }, ...P.map((p) => ({ width: p.type === 'break' ? 6 : 17 }))];
+  const top = sheetHeader(ws, (kind === 'class' ? 'ตารางเรียน ' : 'ตารางสอน ') + e.name, P.length + 1, logoId);
+  const hr = ws.getRow(top);
+  hr.height = 36;
+  const h0 = hr.getCell(1); h0.value = 'วัน / คาบ'; styleCell(h0, { fill: XL.head, bold: true });
+  P.forEach((p, pi) => {
+    const c = hr.getCell(pi + 2), time = [p.start, p.end].filter(Boolean).join('–');
+    if (p.type === 'break') { c.value = ''; styleCell(c, { fill: XL.brk }); return; }
+    c.value = `คาบ ${p.label}${time ? '\n' + time : ''}`; styleCell(c, { fill: XL.head, bold: true, size: 12 });
+  });
+  for (let day = 0; day < days; day++) {
+    const r = ws.getRow(top + 1 + day);
+    r.height = 62;
+    const a = r.getCell(1); a.value = DAY_NAMES[day]; styleCell(a, { fill: XL.head, bold: true, size: 14 });
+    P.forEach((p, pi) => {
+      const c = r.getCell(pi + 2);
+      if (p.type === 'break') { styleCell(c, { fill: XL.brk, size: 11, color: XL.muted }); return; }
+      const s = slotCell(kind, e.id, day, pi);
+      c.value = s.text;
+      styleCell(c, { fill: s.fill || (s.color ? tint(s.color) : null), size: s.lock ? 12 : 13, color: s.lock ? XL.muted : null });
+    });
+  }
+  // ช่องพัก: รวมทุกวันเป็นช่องเดียว ข้อความหมุนตั้ง
+  P.forEach((p, pi) => {
+    if (p.type !== 'break' || days < 1) return;
+    ws.mergeCells(top + 1, pi + 2, top + days, pi + 2);
+    const c = ws.getRow(top + 1).getCell(pi + 2);
+    c.value = p.label || 'พัก';
+    c.alignment = { vertical: 'middle', horizontal: 'center', textRotation: 90, wrapText: true };
+  });
+  ws.views = [{ state: 'frozen', xSplit: 1, ySplit: top }];
+  pageSetup(ws);
+}
+
+/** คาบเรียงลงล่าง: แถว = คาบ คอลัมน์ = วัน */
+function entitySheetByPeriod(wb, used, kind, e, logoId, tint) {
   const d = store.doc, days = d.term.days;
   const ws = wb.addWorksheet(sheetName(kind === 'class' ? e.name : 'ครู ' + (e.short || e.name), used));
   ws.columns = [{ width: 16 }, ...Array(days).fill({ width: 24 })];
@@ -203,10 +260,17 @@ function overviewSheet(wb, used, kind, m, logoId, tint) {
 
 async function exportXlsx() {
   const d = store.doc;
-  if (!d.classes.length) { toast('ยังไม่มีห้องเรียน'); return; }
-  toast('กำลังสร้างไฟล์ Excel…', 8000);
-  let X, pdf, logo;
-  try { [X, pdf] = await Promise.all([loadExcelJS(), pdfModule()]); logo = await pdf.loadLogo(); } catch (e) { toast(e.message); return; }
+  if (!d.classes.length) { notify.warn('ยังไม่มีห้องเรียน'); return; }
+  const busy = notify.loading('กำลังสร้างไฟล์ Excel…');
+  let name;
+  try { name = await buildXlsx(d); } catch (e) { busy.close(); notify.error('สร้าง Excel ไม่สำเร็จ: ' + e.message); console.error(e); return; }
+  busy.close();
+  notify.ok('สร้าง Excel เสร็จ ดาวน์โหลดแล้ว: ' + name, 5000);
+}
+
+async function buildXlsx(d) {
+  const [X, pdf] = await Promise.all([loadExcelJS(), pdfModule()]);
+  const logo = await pdf.loadLogo();
   const wb = new X.Workbook();
   wb.creator = 'ตารางบริบูรณ์';
   const logoId = logo ? wb.addImage({ base64: logo, extension: logo.startsWith('data:image/jpeg') ? 'jpeg' : 'png' }) : null;
@@ -231,7 +295,7 @@ async function exportXlsx() {
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })), download: name });
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  toast('ดาวน์โหลดแล้ว: ' + name);
+  return name;
 }
 
 const safeFile = (s) => String(s || '').replace(/[\\/:*?"<>|]/g, '-').trim() || 'ตาราง';
@@ -241,10 +305,12 @@ async function exportPdf(btn) {
   if (btn.disabled) return;
   const old = btn.textContent;
   btn.disabled = true; btn.textContent = 'กำลังสร้าง PDF…';
+  const busy = notify.loading('กำลังสร้าง PDF…');
   try {
     const name = await (await pdfModule()).downloadPdf({ kind: btn.dataset.pdf, mode: btn.dataset.mode, perPage, paper });
-    toast('ดาวน์โหลดแล้ว: ' + name);
-  } catch (e) { toast('สร้าง PDF ไม่สำเร็จ: ' + e.message); console.error(e); }
+    busy.close();
+    notify.ok('สร้าง PDF เสร็จ ดาวน์โหลดแล้ว: ' + name, 5000);
+  } catch (e) { busy.close(); notify.error('สร้าง PDF ไม่สำเร็จ: ' + e.message); console.error(e); }
   finally { btn.disabled = false; btn.textContent = old; }
 }
 
@@ -264,10 +330,10 @@ async function restore(e) {
     const j = JSON.parse(await f.text());
     const data = j.data || j;
     for (const k of ['term', 'classes', 'teachers', 'rooms', 'subjects', 'assignments', 'locks']) if (!data[k]) throw new Error('ไฟล์ไม่ใช่ไฟล์สำรองของระบบนี้');
-    if (!confirm('นำเข้าแล้วข้อมูลภาคเรียนนี้จะถูกแทนที่ทั้งหมด ยืนยันไหม')) return;
+    if (!(await notify.confirm({ title: 'นำเข้าไฟล์สำรอง?', icon: 'warning', ok: 'นำเข้าและแทนที่', text: `ข้อมูลภาคเรียน “${store.doc.term.name}” จะถูกแทนที่ด้วยไฟล์ “${f.name}” ทั้งหมด` }))) return;
     data.placements = data.placements || [];
     store.doc = data;
     store.commit('import');
-    toast('นำเข้าข้อมูลเรียบร้อย');
-  } catch (err) { toast('นำเข้าไม่สำเร็จ: ' + err.message); }
+    notify.ok('นำเข้าข้อมูลเรียบร้อย');
+  } catch (err) { notify.error('นำเข้าไม่สำเร็จ: ' + err.message); }
 }

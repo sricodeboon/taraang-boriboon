@@ -10,9 +10,10 @@ csrf_check();
 
 cleanup_guests();
 
-// กันสคริปต์สร้างโรงเรียนทดลองไม่จำกัดจนฐานข้อมูลเต็ม: ต่อ IP 10 ครั้ง/ชม. ทั้งระบบ 120 ครั้ง/ชม. และค้างอยู่ไม่เกิน 400 โรงเรียน
+// กันสคริปต์สร้างโรงเรียนทดลองไม่จำกัดจนฐานข้อมูลเต็ม: ต่อ IP 10 ครั้ง/ชม. ทั้งระบบ 30 ครั้ง/ชม. และค้างอยู่ไม่เกิน 400 โรงเรียน
+// (ทดลองหนึ่งรอบ ≈ 25 hits · เดิม 120/ชม. เต็มทั้งวัน ≈ 72k hits เกินเพดาน 50k/วันของโฮสต์ → 30/ชม. ≈ 18k/วัน)
 $live = (int) db_one("SELECT COUNT(*) AS n FROM users WHERE provider = 'guest'")['n'];
-if ($live >= GUEST_MAX_LIVE || rate_limited('guest:' . client_key(), 10, 3600) || rate_limited('guest:all', 120, 3600)) {
+if ($live >= GUEST_MAX_LIVE || rate_limited('guest:' . client_key(), 10, 3600) || rate_limited('guest:all', 30, 3600)) {
     flash('มีผู้ทดลองใช้จำนวนมากในขณะนี้ กรุณาลองใหม่ภายหลัง หรือเข้าสู่ระบบด้วย Google/LINE');
     redirect('index.php');
 }
@@ -26,4 +27,5 @@ db_tx(function () use ($user) {
     db_exec('UPDATE users SET school_id = ? WHERE id = ?', [$schoolId, $user['id']]);
     create_term($schoolId, (int) $user['id'], 'sample');
 });
+flash('เข้าสู่โหมดทดลองแล้ว ข้อมูลตัวอย่างพร้อมให้ลองจัด (ลบเองใน 2 วัน)', 'ok');
 redirect('app.php');

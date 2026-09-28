@@ -44,7 +44,9 @@ function curriculum_subjects(?string $band, int $sem = 1): array {
     foreach ($c['levels'] ?? [] as $lv) {
         if ($lv['band'] !== $band || ($lv['sem'] && $lv['sem'] !== $sem)) continue;
         foreach ($lv['subjects'] as $s) {
-            $out[] = ['id' => 's' . (count($out) + 1), 'code' => $s['code'], 'name' => $s['name'], 'color' => $s['color']];
+            $row = ['id' => 's' . (count($out) + 1), 'code' => $s['code'], 'name' => $s['name'], 'color' => $s['color']];
+            if ((int) ($s['perWeek'] ?? 0) > 0) $row['perWeek'] = (int) $s['perWeek']; // คาบ/สัปดาห์ตามหลักสูตร (ค่าเริ่มต้นตอนสร้างการสอน)
+            $out[] = $row;
         }
     }
     return $out;

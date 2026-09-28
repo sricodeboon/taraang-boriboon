@@ -2,6 +2,7 @@
 // - ตารางรายห้อง/รายครู: 1, 2 หรือ 4 ตารางต่อหน้า
 // - ตารางรวม: ทุกห้อง (หรือทุกครู) ในหน้าเดียว แถว = ห้อง/ครู คอลัมน์ = วัน × คาบ
 import { store, idx, DAY_NAMES, lockAt, assignmentLabel } from './store.js';
+import { orientation } from './rules.js';
 
 const PDFMAKE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.3.3/pdfmake.min.js';
 // SRI: ถ้าไฟล์บน CDN ถูกแก้ เบราว์เซอร์จะไม่รัน (เปลี่ยนเวอร์ชันต้องเปลี่ยน hash ด้วย — ดูได้จาก cdnjs.com)
@@ -91,7 +92,18 @@ function th(s) {
   s = String(s ?? '');
   if (!segmenter || !/[\u0E00-\u0E7F]/.test(s)) return s;
   // ไม่ตัดบรรทัดกลางชื่อชั้น เช่น "ป.1" "ม.4/2"
-  return [...segmenter.segment(s)].map((x) => x.segment).join('\u200B').replace(/([ปม])\u200B?\.\u200B?(?=\d)/g, '$1.').replace(/(\d)\u200B?\/\u200B?(?=\d)/g, '$1/');
+  // คำยาว (เช่น "สาธารณประโยชน์") ใส่จุดตัดทุก 5 ตัวอักษร (ตามกลุ่มสระ/วรรณยุกต์) ไม่ให้ความกว้างขั้นต่ำของคำดันช่องแคบ
+  // (แนววันเรียงลงล่าง 4 ตาราง/หน้า มี 8 คาบในความกว้างครึ่งหน้า) จนตารางล้นขอบกระดาษ — pdfmake ตัดที่จุดนี้เฉพาะเมื่อบรรทัดไม่พอ
+  return [...segmenter.segment(s)].map((x) => breakLong(x.segment)).join('\u200B').replace(/([ปม])\u200B?\.\u200B?(?=\d)/g, '$1.').replace(/(\d)\u200B?\/\u200B?(?=\d)/g, '$1/');
+}
+const graphemes = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('th', { granularity: 'grapheme' }) : null;
+function breakLong(w) {
+  if (!graphemes || w.length <= 8 || !/[\u0E00-\u0E7F]/.test(w)) return w;
+  const g = [...graphemes.segment(w)].map((x) => x.segment);
+  if (g.length <= 7) return w;
+  let out = '';
+  g.forEach((c, i) => { out += (i && i % 5 === 0 ? '\u200B' : '') + c; });
+  return out;
 }
 const shorten = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; };
 const timeOf = (p) => [p.start, p.end].filter(Boolean).join('–');
@@ -103,8 +115,36 @@ const gridLayout = {
 };
 
 // ---------- ตารางรายห้อง / รายครู ----------
-/** fs = ขนาดตัวอักษรหลัก, rowH = ความสูงแถวคาบ (pt) */
-function oneTable(kind, e, slots, { fs, rowH, width, brief }) {
+/** ตารางตามแนวที่โรงเรียนเลือก: วันเรียงลงล่าง (ค่าเริ่มต้น) หรือ คาบเรียงลงล่าง */
+function oneTable(kind, e, slots, opts) {
+  return wrapTable(kind, e, opts, orientation(store.doc) === 'days' ? bodyByDay(kind, e, slots, opts) : bodyByPeriod(kind, e, slots, opts));
+}
+
+/** วันเรียงลงล่าง: แถว = วัน คอลัมน์ = คาบ · ช่องพักเป็นคอลัมน์แคบรวมทุกแถว */
+function bodyByDay(kind, e, slots, { fs, rowH, width, brief }) {
+  const d = store.doc, days = d.term.days, P = d.term.periods;
+  const brkW = fs * 3.1;
+  const body = [[
+    { text: 'วัน', bold: true, fontSize: fs, fillColor: HEAD, margin: [0, fs * 0.4, 0, 0] },
+    ...P.map((p) => (p.type === 'break' ? { text: '', fillColor: BRK }
+      : { stack: [{ text: 'คาบ ' + p.label, bold: true, fontSize: fs }, { text: timeOf(p), fontSize: fs * 0.72, color: MUTED }], fillColor: HEAD, alignment: 'center' })),
+  ]];
+  const heights = [fs * 2.9];
+  for (let day = 0; day < days; day++) {
+    body.push([
+      { text: DAY_NAMES[day], bold: true, fontSize: fs * 1.05, fillColor: HEAD },
+      ...P.map((p, pi) => (p.type === 'break'
+        ? (day === 0 ? { text: th(p.label || 'พัก'), rowSpan: days, fillColor: BRK, color: MUTED, fontSize: fs * 0.72, alignment: 'center' } : {})
+        : cellFull(slots, kind, e.id, day, pi, fs, brief))),
+    ]);
+    heights.push(rowH);
+  }
+  const firstW = Math.max(fs * 5.6, width * 0.1);
+  return { widths: [firstW, ...P.map((p) => (p.type === 'break' ? brkW : '*'))], heights, body };
+}
+
+/** คาบเรียงลงล่าง: แถว = คาบ คอลัมน์ = วัน · ช่องพักเป็นแถวเต็ม */
+function bodyByPeriod(kind, e, slots, { fs, rowH, width, brief }) {
   const d = store.doc, days = d.term.days;
   const body = [[
     { text: 'คาบ', bold: true, fontSize: fs, fillColor: HEAD },
@@ -124,9 +164,13 @@ function oneTable(kind, e, slots, { fs, rowH, width, brief }) {
     ]);
     heights.push(rowH);
   });
+  return { widths: [Math.max(fs * 5.2, width * 0.12), ...Array(days).fill('*')], heights, body };
+}
+
+function wrapTable(kind, e, { fs }, { widths, heights, body }) {
+  const d = store.doc;
   const title = (kind === 'class' ? 'ตารางเรียน ' : 'ตารางสอน ') + e.name;
   const hrs = kind === 'teacher' ? `สอน ${hoursOf('teacher', e.id)} คาบ/สัปดาห์` : `${hoursOf('class', e.id)} คาบ/สัปดาห์`;
-  const firstW = Math.max(fs * 5.2, width * 0.12);
   const heading = { stack: [
     { text: title, bold: true, fontSize: fs * 1.55, color: INK },
     { text: `${window.TT?.school?.name || ''} · ${d.term.name}`, fontSize: fs * 0.9, color: MUTED },
@@ -135,7 +179,7 @@ function oneTable(kind, e, slots, { fs, rowH, width, brief }) {
   const logo = hasLogo ? [{ image: 'logo', fit: [fs * 3.4, fs * 3.4], width: fs * 3.4 }] : [];
   return { stack: [
     { columns: [...logo, { ...heading, width: '*' }, { text: hrs, width: 'auto', fontSize: fs * 0.9, color: MUTED, alignment: 'right', margin: [0, fs * 0.6, 0, 0] }], columnGap: fs * 0.7, margin: [0, 0, 0, fs * 0.4] },
-    { table: { headerRows: 1, dontBreakRows: true, widths: [firstW, ...Array(days).fill('*')], heights, body }, layout: gridLayout },
+    { table: { headerRows: 1, dontBreakRows: true, widths, heights, body }, layout: gridLayout },
   ] };
 }
 
@@ -152,10 +196,11 @@ function docPerEntity(kind, perPage) {
     2: { orient: 'portrait', w: 595 - 2 * M, h: (842 - 2 * M - 14 - 18) / 2, fs: 7.5 },
     4: { orient: 'landscape', w: (842 - 2 * M - 14) / 2, h: (595 - 2 * M - 14 - 14) / 2, fs: 5.6 },
   }[perPage];
-  // ความสูงที่เหลือหลังหัวเรื่อง/หัวตาราง/แถวพัก แบ่งให้แถวคาบเท่า ๆ กัน
+  // ความสูงที่เหลือหลังหัวเรื่อง/หัวตาราง/แถวพัก แบ่งให้แถว (คาบ หรือ วัน) เท่า ๆ กัน
   // heights ของ pdfmake ไม่รวม padding บน-ล่าง (4pt) และข้อความยาวจะดันแถวสูงขึ้น จึงเผื่อไว้ 15%
-  const free = cfg.h - cfg.fs * 5 - (cfg.fs * 1.9 + 4) - brk * (cfg.fs * 1.7 + 4);
-  const rowH = Math.max(cfg.fs * 2.6, (free / teach) * 0.85 - 4);
+  const byDay = orientation(d) === 'days';
+  const free = byDay ? cfg.h - cfg.fs * 5 - (cfg.fs * 2.9 + 4) : cfg.h - cfg.fs * 5 - (cfg.fs * 1.9 + 4) - brk * (cfg.fs * 1.7 + 4);
+  const rowH = Math.max(cfg.fs * 2.6, (free / (byDay ? d.term.days : teach)) * 0.85 - 4);
   const opts = { fs: cfg.fs, rowH, width: cfg.w, brief: { 1: false, 2: 'room', 4: true }[perPage] };
   const content = [];
   for (let i = 0; i < list.length; i += perPage) {

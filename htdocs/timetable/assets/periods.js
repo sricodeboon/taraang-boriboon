@@ -1,6 +1,7 @@
 // แท็บโครงคาบ · คาบล็อก · จัดการภาคเรียน
 import { store, DAY_NAMES, esc } from './store.js';
-import { toast } from './ui.js';
+import { gridModel } from './rules.js';
+import * as notify from './notify.js';
 
 let lockClass = '';       // '' = ทุกห้อง
 let lockLabel = 'กิจกรรม';
@@ -16,7 +17,7 @@ export function render(el) {
     <div class="card" style="padding:16px;display:grid;gap:14px">
       <div><h3 style="font-size:1.05rem">ภาคเรียนและโครงคาบ</h3>
         <p class="muted" style="margin:4px 0 0;font-size:.88rem">กำหนดจำนวนวัน คาบ เวลา และช่องพัก เปลี่ยนแล้วคาบในตารางที่อยู่นอกช่วงจะถูกนำออก</p></div>
-      <div style="display:grid;grid-template-columns:1fr 140px;gap:10px">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:10px">
         <div class="field"><label for="term-name">ชื่อภาคเรียน</label><input id="term-name" class="input" value="${esc(t.name)}"></div>
         <div class="field"><label for="term-days">วันเรียน</label>
           <select id="term-days" class="input">${[5, 6, 7].map((n) => `<option value="${n}" ${t.days === n ? 'selected' : ''}>${n} วัน (${DAY_NAMES[0]}–${DAY_NAMES[n - 1]})</option>`).join('')}</select></div>
@@ -40,15 +41,7 @@ export function render(el) {
         <select id="lock-class" class="input input-sm"><option value="">ทุกห้องเรียน</option>${d.classes.map((c) => `<option value="${esc(c.id)}" ${c.id === lockClass ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
         <input id="lock-label" class="input input-sm" value="${esc(lockLabel)}" placeholder="ชื่อกิจกรรม" style="max-width:200px">
       </div>
-      <div class="scroll-x"><table class="tt lock-grid" style="min-width:0"><thead><tr><th>คาบ</th>${[...Array(t.days).keys()].map((i) => `<th>${DAY_NAMES[i].slice(0, 3)}</th>`).join('')}</tr></thead><tbody>
-        ${t.periods.map((p, pi) => p.type === 'break'
-          ? `<tr class="brk"><th>${esc(p.label)}</th><td colspan="${t.days}">${esc(p.label)}</td></tr>`
-          : `<tr><th>${esc(p.label)}</th>${[...Array(t.days).keys()].map((day) => {
-              const lk = d.locks.find((l) => l.day === day && l.period === pi && (l.classId ?? '') === lockClass);
-              const inherited = lockClass && d.locks.find((l) => l.day === day && l.period === pi && l.classId == null);
-              return `<td class="${lk || inherited ? 'lock' : ''}" data-ld="${day}" data-lp="${pi}" title="${inherited ? 'ล็อกทุกห้อง: ' + esc(inherited.label) : ''}">${lk ? '🔒 ' + esc(lk.label) : inherited ? '🔒 ' + esc(inherited.label) : ''}</td>`;
-            }).join('')}</tr>`).join('')}
-      </tbody></table></div>
+      <div class="scroll-x">${lockGrid(d)}</div>
       <p class="hint" style="margin:0">ล็อกไว้ ${d.locks.length} ช่อง · ล็อกแบบ “ทุกห้อง” จะมีผลกับทุกห้องเรียน</p>
     </div>
   </div>
@@ -61,10 +54,10 @@ export function render(el) {
   </div>`;
 
   el.querySelector('#term-name').addEventListener('change', (e) => { t.name = e.target.value.trim() || 'ภาคเรียน'; store.commit('term'); });
-  el.querySelector('#term-days').addEventListener('change', (e) => {
+  el.querySelector('#term-days').addEventListener('change', async (e) => {
     const n = +e.target.value;
     const out = d.placements.filter((p) => p.day >= n).length;
-    if (out && !confirm(`มี ${out} คาบในวันที่จะถูกตัดออก ยืนยันไหม`)) { e.target.value = t.days; return; }
+    if (out && !(await notify.confirm({ title: 'ลดจำนวนวันเรียน?', icon: 'warning', ok: 'ลดจำนวนวัน', text: `มี ${out} คาบในวันที่จะถูกตัดออก คาบเหล่านั้นจะถูกนำออกจากตาราง` }))) { e.target.value = t.days; return; }
     t.days = n;
     d.placements = d.placements.filter((p) => p.day < n);
     d.locks = d.locks.filter((l) => l.day < n);
@@ -81,11 +74,11 @@ export function render(el) {
     }
     store.commit('term'); render(root);
   }));
-  el.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => {
+  el.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', async () => {
     if (t.periods.length <= 1) return;
     const i = +b.dataset.rm;
     const n = d.placements.filter((p) => p.period === i).length;
-    if (n && !confirm(`คาบนี้มีวิชาจัดอยู่ ${n} คาบ ลบแล้วจะถูกนำออก ยืนยันไหม`)) return;
+    if (n && !(await notify.confirm({ title: 'ลบคาบนี้?', icon: 'warning', ok: 'ลบคาบ', text: `คาบ “${t.periods[i]?.label || ''}” มีวิชาจัดอยู่ ${n} คาบ ลบแล้วจะถูกนำออกจากตาราง` }))) return;
     t.periods.splice(i, 1);
     shift(i, -1);
     store.commit('term'); render(root);
@@ -118,7 +111,7 @@ export function render(el) {
     else {
       d.locks.push({ classId: cls, day, period, label: lockLabel.trim() || 'กิจกรรม' });
       const hit = d.placements.filter((p) => p.day === day && p.period === period && (!cls || store.doc.assignments.find((a) => a.id === p.assignmentId)?.classId === cls));
-      if (hit.length) toast(`มี ${hit.length} คาบวางทับช่องนี้อยู่ ย้ายออกได้ที่แท็บจัดตาราง`);
+      if (hit.length) notify.warn(`มี ${hit.length} คาบวางทับช่องนี้อยู่ ย้ายออกได้ที่แท็บจัดตาราง`);
     }
     store.commit('lock'); render(root);
   }));
@@ -126,6 +119,26 @@ export function render(el) {
   el.querySelector('#t-new').addEventListener('click', () => actions.newTerm?.());
   el.querySelector('#t-copy').addEventListener('click', () => actions.copyTerm?.());
   el.querySelector('#t-del').addEventListener('click', () => actions.deleteTerm?.());
+}
+
+/** ตารางคลิกล็อกคาบ ตามแนวตารางของโรงเรียน (วันเรียงลงล่าง / คาบเรียงลงล่าง) */
+function lockGrid(d) {
+  const g = gridModel(d);
+  const head = (x) => (x.p ? esc(x.p.label) : esc(x.name.slice(0, 3)));
+  let h = `<table class="tt lock-grid ${g.orient === 'days' ? 'by-day' : ''}" style="min-width:0"><thead><tr><th>${g.corner}</th>${g.cols.map((c) => (c.brk ? '<th class="brk-col"></th>' : `<th>${head(c)}</th>`)).join('')}</tr></thead><tbody>`;
+  g.rows.forEach((r, ri) => {
+    if (r.brk) { h += `<tr class="brk"><th>${esc(r.p.label)}</th><td colspan="${g.cols.length}">${esc(r.p.label)}</td></tr>`; return; }
+    h += `<tr><th>${head(r)}</th>`;
+    for (const c of g.cols) {
+      if (c.brk) { if (ri === 0) h += `<td class="brk-col" rowspan="${g.rows.length}"><span>${esc(c.p.label)}</span></td>`; continue; }
+      const { day, period: pi } = g.at(r, c);
+      const lk = d.locks.find((l) => l.day === day && l.period === pi && (l.classId ?? '') === lockClass);
+      const inherited = lockClass && d.locks.find((l) => l.day === day && l.period === pi && l.classId == null);
+      h += `<td class="${lk || inherited ? 'lock' : ''}" data-ld="${day}" data-lp="${pi}" title="${inherited ? 'ล็อกทุกห้อง: ' + esc(inherited.label) : ''}">${lk ? '🔒 ' + esc(lk.label) : inherited ? '🔒 ' + esc(inherited.label) : ''}</td>`;
+    }
+    h += '</tr>';
+  });
+  return h + '</tbody></table>';
 }
 
 /** เลื่อนเลขคาบของ placements/locks/unavailable เมื่อแทรก (+1) หรือลบ (-1) คาบที่ index i */

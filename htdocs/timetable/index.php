@@ -7,6 +7,7 @@ $u = current_user();
 if ($u) redirect($u['school_id'] ? 'app.php' : 'signup.php');
 $ready = providers_ready();
 $msg = flash();
+$msgKind = flash_kind();
 // นับเฉพาะโรงเรียนที่ลงทะเบียนจริง (Google/LINE) ไม่นับโรงเรียนทดลองจาก "ลองใช้ทันที"
 try {
     $schoolCount = (int) (db_one("SELECT COUNT(DISTINCT school_id) AS n FROM users WHERE provider <> 'guest' AND school_id IS NOT NULL")['n'] ?? 0);
@@ -64,7 +65,7 @@ page_head('ตารางบริบูรณ์ · จัดตาราง�
 
     <div class="card login">
       <h2>เข้าใช้งาน</h2>
-      <?php if ($msg): ?><div class="flash"><?= h($msg) ?></div><?php endif; ?>
+      <?php if ($msg): ?><div class="flash" data-flash role="status"><?= h($msg) ?></div><?php endif; ?>
       <?php if ($ready['google']): ?>
         <a class="btn g-btn" href="auth/login.php?p=google">เข้าสู่ระบบด้วย Google</a>
       <?php else: ?>
@@ -90,4 +91,5 @@ page_head('ตารางบริบูรณ์ · จัดตาราง�
     · ดาวน์โหลดโปรแกรม: <a href="<?= GITHUB_URL ?>" target="_blank" rel="noopener">GitHub</a> (<a href="<?= GITHUB_URL ?>/archive/refs/heads/main.zip">.zip</a>)
   </footer>
 </main>
+<?= flash_script($msg, $msgKind) ?>
 <?php page_foot();

@@ -1,12 +1,14 @@
 // ตัวควบคุมหลัก: โหลด/บันทึกภาคเรียน, แท็บ, สถานะบันทึก
-import { store, index, merge3 } from './store.js';
-import { toast } from './ui.js';
+import { store, index, merge3, esc } from './store.js';
+import * as notify from './notify.js';
 import * as board from './board.js';
 import * as data from './data.js';
 import * as periods from './periods.js';
 import * as exporter from './export.js';
 
 const TABS = { board, data, periods, export: exporter };
+store.curriculum = window.TT.cur || null; // รหัสวิชา → คาบ/สัปดาห์ตามหลักสูตร (เติมให้ข้อมูลเก่าตอน sanitize)
+notify.warm();
 let tab = sessionGet('tab') || 'board';
 let terms = [];
 
@@ -63,8 +65,8 @@ async function loadTerm(id) {
   firstDirtyAt = 0;
   sessionSet('term', t.id);
   renderTermSelect();
-  restoreDraft(t);
   renderTab();
+  await restoreDraft(t);
   if (!isDirty()) saveState('บันทึกแล้ว', 'ok');
 }
 
@@ -102,9 +104,12 @@ store.onChange((reason) => {
   lastChangeAt = now;
   if (URGENT.has(reason)) urgent = true;
   saveState('แก้ไขแล้ว · รอบันทึก', '');
+  // บอกครั้งแรกของรอบแก้ไข (ไม่เกินทุก 3 นาที) ว่าเก็บในเครื่องแล้ว ไม่ต้องกดบันทึก
+  if (firstDirtyAt === now && now - lastLocalNote > 180000) { lastLocalNote = now; notify.status('บันทึกในเครื่องแล้ว · รอส่งขึ้นระบบอัตโนมัติ'); }
   writeDraftSoon();
   schedule();
 });
+let lastLocalNote = 0;
 
 function schedule() {
   clearTimeout(saveTimer);
@@ -130,31 +135,39 @@ async function doSave({ keepalive = false } = {}) {
   const body = `{"id":${termId},"version":${store.version},"data":${text}}`;
   lastSaveAt = Date.now(); urgent = false;
   saveState('กำลังบันทึก…');
+  // ส่งนานเกิน 0.8 วิ (เน็ตช้า) จึงขึ้น toast "กำลังบันทึก" ส่งเร็วเห็นแค่ "บันทึกแล้ว"
+  const slow = setTimeout(() => notify.status('กำลังบันทึก…', 4000), 800);
   try {
     const r = await api('term.save', body, {}, false, keepalive && utf8Bytes(body) < KEEPALIVE_MAX);
+    clearTimeout(slow);
     if (store.termId !== termId) return; // สลับภาคเรียนไประหว่างส่ง
     store.version = r.version;
     savedText = text; retryMs = 0;
     const t = terms.find((x) => +x.id === termId);
     if (t && t.name !== store.doc.term.name) { t.name = store.doc.term.name; renderTermSelect(); }
+    const wasOffline = retryMs > 0 || offline;
+    offline = false;
     if (isDirty()) { saveState('แก้ไขแล้ว · รอบันทึก'); writeDraft(); schedule(); } else markClean(termId);
+    notify.status(wasOffline ? 'เชื่อมต่อใหม่แล้ว · ส่งการแก้ไขที่ค้างขึ้นระบบแล้ว' : 'บันทึกแล้ว', wasOffline ? 3500 : 1600);
   } catch (e) {
+    clearTimeout(slow);
     if (store.termId !== termId) return;
     if (e.status === 409) {
       await resolveConflict();
     } else if (e.status === 404) {
       saveState('ไม่พบภาคเรียน', 'warn');
-      toast('ไม่พบภาคเรียนนี้บนเซิร์ฟเวอร์ (อาจถูกลบจากหน้าต่างอื่น) การแก้ไขเก็บไว้ในเครื่องนี้ ดาวน์โหลดไฟล์สำรองได้ที่แท็บส่งออก', 9000);
+      notify.error('ไม่พบภาคเรียนนี้บนเซิร์ฟเวอร์ (อาจถูกลบจากหน้าต่างอื่น) การแก้ไขเก็บไว้ในเครื่องนี้ ดาวน์โหลดไฟล์สำรองได้ที่แท็บส่งออก', 9000);
     } else if (e.status === 401 || e.status === 403) {
       saveState('หมดเวลาเข้าสู่ระบบ', 'warn');
-      toast('หมดเวลาเข้าสู่ระบบ การแก้ไขเก็บไว้ในเครื่องนี้แล้ว เข้าสู่ระบบใหม่แล้วเปิดภาคเรียนนี้ ระบบจะกู้คืนให้', 9000);
+      notify.alertBox('หมดเวลาเข้าสู่ระบบ', 'การแก้ไขเก็บไว้ในเครื่องนี้แล้ว เข้าสู่ระบบใหม่แล้วเปิดภาคเรียนนี้ ระบบจะกู้คืนให้', 'warning');
     } else if (e.status >= 400 && e.status < 500) {
       // ข้อมูลไม่ผ่านการตรวจ (422/413 ฯลฯ) ส่งซ้ำก็ไม่ผ่าน → ไม่วนส่ง (เปลือง hits) รอผู้ใช้แก้แล้วค่อยส่งรอบใหม่
-      saveState('บันทึกไม่สำเร็จ', 'warn'); toast(e.message + ' — การแก้ไขเก็บไว้ในเครื่องแล้ว', 9000);
+      saveState('บันทึกไม่สำเร็จ', 'warn'); notify.error('บันทึกไม่สำเร็จ: ' + e.message + ' — การแก้ไขเก็บไว้ในเครื่องแล้ว', 9000);
     } else {
       // เน็ตหลุด/เซิร์ฟเวอร์ไม่ว่าง → ลองใหม่แบบเว้นระยะเพิ่มขึ้นเรื่อย ๆ (20 วิ → สูงสุด 5 นาที) ไม่ยิงถี่ใส่โฮสต์ที่กำลังเต็ม
       retryMs = Math.min(300000, retryMs ? retryMs * 2 : 20000);
-      saveState('บันทึกไม่สำเร็จ', 'warn'); toast(e.message + ' — เก็บไว้ในเครื่องแล้ว จะลองส่งใหม่อัตโนมัติ');
+      saveState(navigator.onLine === false ? 'ออฟไลน์ · เก็บในเครื่อง' : 'บันทึกไม่สำเร็จ', 'warn');
+      if (retryMs === 20000) notify.warn((navigator.onLine === false ? 'ออฟไลน์อยู่' : 'ส่งขึ้นระบบไม่สำเร็จ (' + e.message + ')') + ' — การแก้ไขเก็บในเครื่องแล้ว จะลองส่งใหม่อัตโนมัติ');
       clearTimeout(saveTimer); saveTimer = setTimeout(() => save(), retryMs);
       return;
     }
@@ -172,12 +185,16 @@ function markClean(termId) {
 // ตอนนี้เทียบ 3 ทาง (ฐาน = ฉบับที่บันทึกล่าสุดของหน้านี้, ของเรา, ของเซิร์ฟเวอร์) รายหมวด: แก้ฝั่งเดียว = เอาฝั่งนั้น, แก้ทั้งสองฝั่ง = ถาม
 const PART_NAMES = { term: 'ชื่อภาคเรียน/โครงคาบ', classes: 'ห้องเรียน', teachers: 'ครู', rooms: 'ห้องพิเศษ', subjects: 'วิชา', assignments: 'การสอน', locks: 'คาบล็อก', placements: 'ตารางที่จัดไว้' };
 /** รวมแล้วถามเฉพาะเมื่อชนจริง คืนเอกสารที่รวมแล้ว */
-function mergeAsk(base, mine, theirs, intro) {
+async function mergeAsk(base, mine, theirs, intro) {
   let { merged, clashes } = merge3(base, mine, theirs);
   if (clashes.length) {
     const names = clashes.map((k) => PART_NAMES[k] || k).join(', ');
-    const useMine = confirm(`${intro}\nส่วนที่ถูกแก้ทั้งสองที่ (รายการเดียวกัน): ${names}\n(ส่วนอื่นรวมให้อัตโนมัติแล้ว)\n\nกด OK = ใช้ฉบับของหน้าจอนี้ในรายการที่ชน\nกด Cancel = ใช้ฉบับล่าสุดจากอีกที่ในรายการที่ชน`);
-    merged = merge3(base, mine, theirs, useMine ? 'mine' : 'theirs').merged;
+    const pick = await notify.choose({
+      title: 'มีการแก้ไขจากสองที่พร้อมกัน', icon: 'warning',
+      html: `<p style="margin:0">${esc(intro)}</p><p style="margin:8px 0 0">ส่วนที่ถูกแก้ทั้งสองที่ (รายการเดียวกัน): <b>${esc(names)}</b><br><span class="muted">ส่วนอื่นรวมให้อัตโนมัติแล้ว</span></p><p style="margin:8px 0 0">ในรายการที่ชน จะใช้ฉบับไหน</p>`,
+      ok: 'ใช้ฉบับของหน้าจอนี้', deny: 'ใช้ฉบับล่าสุดจากอีกที่', cancel: false, outside: false,
+    });
+    merged = merge3(base, mine, theirs, pick === 'deny' ? 'theirs' : 'mine').merged;
   }
   // คาบที่อ้างถึงการสอนที่ถูกลบไปจากอีกที่ → ตัดทิ้ง
   if (Array.isArray(merged.placements) && Array.isArray(merged.assignments)) {
@@ -191,15 +208,15 @@ async function resolveConflict() {
   const termId = store.termId;
   saveState('กำลังรวมการแก้ไข…', 'warn');
   let t;
-  try { t = await api('term', undefined, { id: termId }); } catch (e) { saveState('บันทึกไม่สำเร็จ', 'warn'); toast(e.message); saveTimer = setTimeout(() => save(), 20000); return; }
+  try { t = await api('term', undefined, { id: termId }); } catch (e) { saveState('บันทึกไม่สำเร็จ', 'warn'); notify.warn(e.message); saveTimer = setTimeout(() => save(), 20000); return; }
   if (store.termId !== termId) return;
   const base = savedText ? JSON.parse(savedText) : null;
-  const { merged, clashes } = mergeAsk(base, store.doc, t.data, 'ภาคเรียนนี้ถูกแก้จากอีกหน้าต่างหรืออีกเครื่องในเวลาเดียวกัน');
+  const { merged, clashes } = await mergeAsk(base, store.doc, t.data, 'ภาคเรียนนี้ถูกแก้จากอีกหน้าต่างหรืออีกเครื่องในเวลาเดียวกัน');
   store.doc = merged; store.version = t.version;
   index();
   savedText = JSON.stringify(t.data);
   renderTab();
-  toast(clashes.length ? 'รวมการแก้ไขแล้ว กำลังบันทึก' : 'รวมการแก้ไขจากอีกหน้าต่างให้อัตโนมัติแล้ว', 5000);
+  notify.info(clashes.length ? 'รวมการแก้ไขแล้ว กำลังบันทึก' : 'รวมการแก้ไขจากอีกหน้าต่างให้อัตโนมัติแล้ว', 5000);
   if (isDirty()) { urgent = true; lastChangeAt = Date.now() - IDLE_MS; schedule(); } else markClean(termId);
 }
 
@@ -219,7 +236,7 @@ function clearAllDrafts() {
 }
 
 /** เปิดภาคเรียนแล้วพบฉบับร่างที่ยังไม่ได้ส่ง (ปิดหน้า/เน็ตหลุด/หมดเวลาเข้าสู่ระบบ) → กู้คืน */
-function restoreDraft(t) {
+async function restoreDraft(t) {
   let dr = null;
   try { dr = JSON.parse(localStorage.getItem(DRAFT_KEY(t.id)) || 'null'); } catch { /* เสีย */ }
   if (!dr || typeof dr.doc !== 'string') return;
@@ -231,14 +248,23 @@ function restoreDraft(t) {
     // เซิร์ฟเวอร์ถูกแก้หลังจากร่างนี้ → รวม 3 ทางถ้ามีฉบับฐาน · ไม่มีฐาน = ถามว่าจะเอาฉบับไหน
     let base = null;
     try { base = typeof dr.base === 'string' && dr.base ? JSON.parse(dr.base) : null; } catch { /* เสีย */ }
-    if (base) doc = mergeAsk(base, doc, t.data, `พบการแก้ไขที่ยังไม่ได้บันทึกในเครื่องนี้ (${when}) และข้อมูลบนเซิร์ฟเวอร์ถูกแก้หลังจากนั้น`).merged;
-    else if (!confirm(`พบการแก้ไขที่ยังไม่ได้บันทึกในเครื่องนี้ (${when})\nแต่ข้อมูลบนเซิร์ฟเวอร์ถูกแก้หลังจากนั้น\n\nกด OK = ใช้ฉบับในเครื่องนี้ (บันทึกทับ)\nกด Cancel = ใช้ข้อมูลบนเซิร์ฟเวอร์ และทิ้งฉบับในเครื่อง`)) { clearDraft(t.id); return; }
+    if (base) doc = (await mergeAsk(base, doc, t.data, `พบการแก้ไขที่ยังไม่ได้บันทึกในเครื่องนี้ (${when}) และข้อมูลบนเซิร์ฟเวอร์ถูกแก้หลังจากนั้น`)).merged;
+    else {
+      const pick = await notify.choose({
+        title: 'พบฉบับร่างในเครื่องนี้', icon: 'question', outside: false, cancel: false,
+        text: `พบการแก้ไขที่ยังไม่ได้บันทึกในเครื่องนี้ (${when})\nแต่ข้อมูลบนเซิร์ฟเวอร์ถูกแก้หลังจากนั้น จะใช้ฉบับไหน`,
+        ok: 'ใช้ฉบับในเครื่องนี้ (บันทึกทับ)', deny: 'ใช้ข้อมูลบนเซิร์ฟเวอร์',
+      });
+      if (pick !== 'confirm') { clearDraft(t.id); return; }
+    }
   }
+  if (store.termId !== +t.id) return;
   store.doc = doc;
   index();
   firstDirtyAt = lastChangeAt = Date.now(); urgent = true;
   saveState('แก้ไขแล้ว · รอบันทึก');
-  toast(`กู้การแก้ไขที่ยังไม่ได้บันทึก (${when}) กลับมาแล้ว`, 6000);
+  renderTab();
+  notify.info(`กู้ฉบับร่างที่ยังไม่ได้บันทึก (${when}) กลับมาแล้ว กำลังส่งขึ้นระบบ`, 6000);
   schedule();
 }
 
@@ -263,45 +289,49 @@ async function newTerm() {
   // ผู้ใช้จริงคนแรกเลือกค่าเริ่มต้นเดิม (ตารางว่าง) แล้วกรอกครู/การสอนใหม่ทั้งหมดเกือบ 1.5 ชม. → ให้ "สำเนาจากภาคเรียนเดิม" เป็นค่าเริ่มต้น
   const cur = store.doc ? store.doc.term.name : '';
   const kinds = cur ? [['copy:keep', `สำเนาจาก “${cur}” (ครู ห้อง วิชา การสอน และตาราง)`], ['copy:clear', `สำเนาจาก “${cur}” แต่ล้างตาราง (จัดใหม่)`], ...NEW_TERM_KINDS] : NEW_TERM_KINDS;
-  const dlg = document.createElement('dialog');
-  dlg.className = 'card dlg';
-  dlg.innerHTML = `<form method="dialog" style="display:grid;gap:12px">
-    <h3 style="font-size:1.1rem">สร้างภาคเรียนใหม่</h3>
+  const res = await notify.form({
+    title: 'สร้างภาคเรียนใหม่', ok: 'สร้าง',
+    html: `<div style="display:grid;gap:12px;text-align:left">
     <div class="field"><label for="nt-name">ชื่อภาคเรียน</label>
       <input class="input" id="nt-name" required maxlength="200" value="ภาคเรียนที่ 2/${new Date().getFullYear() + 543}"></div>
     <div class="field"><label for="nt-kind">เริ่มต้นด้วย</label>
       <select class="input" id="nt-kind">${kinds.map(([v, t]) => `<option value="${v}">${escapeHtml(t)}</option>`).join('')}</select>
-      <span class="hint">แบบสำเนา: ครู ห้อง วิชา และการสอนตามมาครบ ไม่ต้องกรอกใหม่ · แบบตารางว่าง: ต้องกรอกครูและการสอนเองทั้งหมด</span></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn" value="cancel" formnovalidate>ยกเลิก</button><button class="btn btn-primary" value="ok">สร้าง</button></div>
-  </form>`;
-  document.body.appendChild(dlg);
-  dlg.showModal();
-  const ok = await new Promise((res) => dlg.addEventListener('close', () => res(dlg.returnValue === 'ok'), { once: true }));
-  const name = dlg.querySelector('#nt-name').value.trim();
-  const [template, band] = dlg.querySelector('#nt-kind').value.split(':');
-  dlg.remove();
-  if (!ok || !name) { renderTermSelect(); return; }
+      <span class="hint">แบบสำเนา: ครู ห้อง วิชา และการสอนตามมาครบ ไม่ต้องกรอกใหม่ · แบบตารางว่าง: ต้องกรอกครูและการสอนเองทั้งหมด</span></div></div>`,
+    read: (root) => {
+      const name = root.querySelector('#nt-name').value.trim();
+      if (!name) return { error: 'กรุณาตั้งชื่อภาคเรียน' };
+      return { name, kind: root.querySelector('#nt-kind').value };
+    },
+  });
+  if (!res) { renderTermSelect(); return; }
+  const { name } = res;
+  const [template, band] = res.kind.split(':');
+  const busy = notify.loading(template === 'copy' ? 'กำลังสำเนาภาคเรียน…' : 'กำลังสร้างภาคเรียน…');
   try {
     await flush();
     const body = template === 'copy' ? { name, template, from: store.termId, clear: band === 'clear' } : { name, template, band: band || null };
     const r = await api('term.create', body);
     await refreshTerms(r.id);
-    toast(template === 'copy' ? 'สร้างภาคเรียนใหม่จากสำเนาแล้ว ครู วิชา และการสอนตามมาครบ' : 'สร้างภาคเรียนแล้ว');
-  } catch (e) { toast(e.message); renderTermSelect(); }
+    busy.close();
+    notify.ok(template === 'copy' ? 'สร้างภาคเรียนใหม่จากสำเนาแล้ว ครู วิชา และการสอนตามมาครบ' : 'สร้างภาคเรียนแล้ว');
+  } catch (e) { busy.close(); notify.error('สร้างภาคเรียนไม่สำเร็จ: ' + e.message); renderTermSelect(); }
 }
 async function copyTerm() {
-  await flush();
-  try { const r = await api('term.create', { template: 'copy', from: store.termId }); await refreshTerms(r.id); toast('ทำสำเนาแล้ว ข้อมูลครู วิชา และตารางถูกคัดลอกมาทั้งหมด'); }
-  catch (e) { toast(e.message); }
+  const busy = notify.loading('กำลังทำสำเนาภาคเรียน…');
+  try {
+    await flush();
+    const r = await api('term.create', { template: 'copy', from: store.termId }); await refreshTerms(r.id);
+    busy.close(); notify.ok('ทำสำเนาแล้ว ข้อมูลครู วิชา และตารางถูกคัดลอกมาทั้งหมด');
+  } catch (e) { busy.close(); notify.error('ทำสำเนาไม่สำเร็จ: ' + e.message); }
 }
 async function deleteTerm() {
-  if (!confirm(`ลบ “${store.doc.term.name}” ถาวร ยืนยันไหม`)) return;
+  const ok = await notify.confirmDanger({ title: 'ลบภาคเรียนนี้ถาวร', html: `ลบ “<b>${esc(store.doc.term.name)}</b>” ทั้งภาคเรียน (ห้อง ครู วิชา การสอน และตาราง) <b>กู้คืนไม่ได้</b><br><span class="muted">แนะนำให้ดาวน์โหลดไฟล์สำรองที่แท็บส่งออกก่อน</span>`, ok: 'ลบภาคเรียน' });
+  if (!ok) return;
   clearTimeout(saveTimer);
   try { await savePromise; } catch { /* ไม่เป็นไร */ }
   const id = store.termId;
-  try { await api('term.delete', { id }); clearDraft(id); savedText = JSON.stringify(store.doc); sessionSet('term', ''); await refreshTerms(); toast('ลบภาคเรียนแล้ว'); }
-  catch (e) { toast(e.message); }
+  try { await api('term.delete', { id }); clearDraft(id); savedText = JSON.stringify(store.doc); sessionSet('term', ''); await refreshTerms(); notify.ok('ลบภาคเรียนแล้ว'); }
+  catch (e) { notify.error('ลบไม่สำเร็จ: ' + e.message); }
 }
 async function flush() { clearTimeout(saveTimer); if (savePromise || isDirty()) await save(); }
 periods.setActions({ newTerm, copyTerm, deleteTerm });
@@ -330,14 +360,21 @@ document.querySelector('form[action="auth/logout.php"]')?.addEventListener('subm
   if (f.dataset.ready) return;
   e.preventDefault();
   try { await flush(); } catch { /* ส่งไม่ได้ก็ออกต่อ */ }
-  if (isDirty() && !confirm('ยังบันทึกการแก้ไขล่าสุดไม่สำเร็จ ออกจากระบบเลยไหม (การแก้ไขนั้นจะหาย)')) return;
+  if (isDirty() && !(await notify.confirm({ title: 'ยังบันทึกไม่สำเร็จ', text: 'การแก้ไขล่าสุดยังส่งขึ้นระบบไม่สำเร็จ ถ้าออกจากระบบตอนนี้การแก้ไขนั้นจะหาย', ok: 'ออกจากระบบเลย', icon: 'warning' }))) return;
   clearAllDrafts();
   f.dataset.ready = '1';
   f.submit();
 });
 
-if (window.TT.flash) toast(window.TT.flash, 6000);
-refreshTerms().catch((e) => { saveState('โหลดไม่สำเร็จ', 'warn'); toast(e.message); });
+if (window.TT.flash) (window.TT.flashKind === 'ok' ? notify.ok : window.TT.flashKind === 'info' ? notify.info : notify.warn)(window.TT.flash, 6000);
+refreshTerms().catch((e) => { saveState('โหลดไม่สำเร็จ', 'warn'); notify.error('โหลดข้อมูลไม่สำเร็จ: ' + e.message); });
+
+// ออฟไลน์/กลับมาออนไลน์: บอกสถานะ และส่งที่ค้างทันทีเมื่อเน็ตกลับมา
+let offline = false;
+window.addEventListener('offline', () => { offline = true; saveState('ออฟไลน์ · เก็บในเครื่อง', 'warn'); notify.warn('ออฟไลน์ — แก้ไขต่อได้ ระบบเก็บในเครื่องไว้ก่อน แล้วส่งให้เมื่อเน็ตกลับมา', 6000); });
+window.addEventListener('online', () => {
+  if (isDirty()) { retryMs = 0; urgent = true; save(); } else { offline = false; notify.ok('เชื่อมต่อใหม่แล้ว', 2500); }
+});
 
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function sessionGet(k) { try { return sessionStorage.getItem('tt:' + k); } catch { return null; } }

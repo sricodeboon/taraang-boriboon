@@ -29,6 +29,19 @@ function brand_html(string $href = 'index.php'): string {
     return '<a class="brand" href="' . h($href) . '"><img class="brand-mark" src="assets/brand/taraang-mark-color.svg" alt="" width="32" height="32"><span>ตาราง<span class="b">{</span><span class="c">บริบูรณ์</span><span class="b">}</span></span></a>';
 }
 
+/**
+ * แสดงข้อความ flash ด้วย SweetAlert2 (assets/notify.js): ok/info = toast มุมจอ · warn/error = กล่องแจ้งเตือน
+ * กล่อง .flash ในหน้า (ไม่ต้องใช้ JS) ถูกซ่อนเมื่อโหลด SweetAlert2 ได้ · โหลดไม่ได้ = คงกล่องเดิมไว้
+ */
+function flash_script(?string $msg, string $kind = 'warn'): string {
+    if (!$msg) return '';
+    $j = fn($v) => json_encode($v, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    return '<script type="module" nonce="' . csp_nonce() . '">import * as n from "./assets/notify.js?v=' . (int) @filemtime(APP_ROOT . '/assets/notify.js') . '";'
+        . 'const m=' . $j($msg) . ',k=' . $j($kind) . ';'
+        . 'n.load().then((S)=>{if(!S)return;document.querySelectorAll(".flash[data-flash]").forEach((e)=>{e.hidden=true;});'
+        . 'if(k==="ok"||k==="info")n.toast(m,k,6000);else n.alertBox(k==="error"?"เกิดข้อผิดพลาด":"แจ้งเตือน",m,k==="error"?"error":"warning");});</script>';
+}
+
 function page_foot(): void { ?>
 </body>
 </html>

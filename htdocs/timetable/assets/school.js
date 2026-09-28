@@ -1,6 +1,6 @@
 // แท็บข้อมูล → โรงเรียน: แก้ชื่อ/รหัส/ที่ตั้ง และอัปโหลดโลโก้ (ย่อรูปในเบราว์เซอร์ก่อนส่ง ไม่กิน CPU โฮสต์)
 import { esc } from './store.js';
-import { toast } from './ui.js';
+import * as notify from './notify.js';
 import { attachGeo } from './geo.js';
 
 const LOGO_SIDE = 256;          // ย่อด้านยาวสุดเหลือเท่านี้
@@ -81,9 +81,9 @@ export function render(el) {
       });
       window.TT.school = r.school;
       applyHeader();
-      toast('บันทึกข้อมูลโรงเรียนแล้ว');
+      notify.ok('บันทึกข้อมูลโรงเรียนแล้ว');
       render(el);
-    } catch (err) { toast(err.message); btn.disabled = false; }
+    } catch (err) { notify.error('บันทึกไม่สำเร็จ: ' + err.message); btn.disabled = false; }
   });
 
   $('logo-file')?.addEventListener('change', async (e) => {
@@ -91,21 +91,23 @@ export function render(el) {
     e.target.value = '';
     if (!f) return;
     let url;
-    try { url = await shrink(f); } catch (err) { toast(err.message); return; }
+    try { url = await shrink(f); } catch (err) { notify.warn(err.message); return; }
     saveLogo(el, url);
   });
-  $('logo-del')?.addEventListener('click', () => { if (confirm('ลบโลโก้โรงเรียน ยืนยันไหม')) saveLogo(el, null); });
+  $('logo-del')?.addEventListener('click', async () => { if (await notify.confirm({ title: 'ลบโลโก้โรงเรียน?', text: 'โลโก้จะหายจากหัวแอป PDF และ Excel (อัปโหลดใหม่ได้ภายหลัง)', ok: 'ลบโลโก้', icon: 'warning' })) saveLogo(el, null); });
 }
 
 async function saveLogo(el, logo) {
   if (saving) return;
   saving = true; render(el);
+  const busy = notify.loading(logo ? 'กำลังอัปโหลดโลโก้…' : 'กำลังลบโลโก้…');
   try {
     const r = await post('school.logo', { logo });
     window.TT.school.logoRev = r.logoRev;
     applyHeader();
-    toast(logo ? 'บันทึกโลโก้แล้ว' : 'ลบโลโก้แล้ว');
-  } catch (err) { toast('บันทึกโลโก้ไม่สำเร็จ: ' + err.message, 6000); }
+    busy.close();
+    notify.ok(logo ? 'อัปโหลดโลโก้แล้ว แสดงที่หัวแอป PDF และ Excel' : 'ลบโลโก้แล้ว');
+  } catch (err) { busy.close(); notify.error('บันทึกโลโก้ไม่สำเร็จ: ' + err.message, 7000); }
   finally { saving = false; render(el); }
 }
 

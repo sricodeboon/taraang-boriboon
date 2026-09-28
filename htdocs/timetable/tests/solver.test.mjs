@@ -282,7 +282,9 @@ await test('infeasible (ห้องเรียนคาบเกิน): ค�
   assert.ok(el < 3300, `ใช้เวลา ${el}`);
   assert.ok(r.unplaced.length > 0);
   const miss = r.unplaced.reduce((s, u) => s + u.remaining, 0);
-  assert.equal(miss, 4, 'ม.1/1 มีคาบว่าง 36 ต้องการ 40 → ค้าง 4 คาบ');
+  // ม.1/1 มีคาบว่าง 36 (หลังหักคาบล็อก) · ความต้องการคำนวณจากข้อมูลตัวอย่าง (ปรับตามหลักสูตรแล้ว 31 คาบ) + 8 → ค้าง 3 คาบ
+  const need = sample.assignments.filter((a) => a.classId === 'c11').reduce((n, a) => n + a.perWeek, 0) + 8;
+  assert.equal(miss, need - 36, `ม.1/1 มีคาบว่าง 36 ต้องการ ${need} → ค้าง ${need - 36} คาบ`);
   for (const u of r.unplaced) assert.ok(typeof u.reason === 'string' && u.reason.length > 5);
   assert.ok(r.unplaced.some((u) => /คาบว่างเพียง/.test(u.reason)), JSON.stringify(r.unplaced));
   assert.equal(r.stats.hardViolations, 0, 'สิ่งที่วางแล้วต้องไม่ชน');

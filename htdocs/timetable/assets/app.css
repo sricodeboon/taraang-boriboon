@@ -68,3 +68,53 @@ button, input, select, textarea { font:inherit; color:inherit; }
 .table th, .table td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:middle; }
 .table th { font-size:.84rem; color:var(--muted); font-weight:500; background:var(--surface-2); position:sticky; top:0; }
 .scroll-x { overflow-x:auto; }
+
+/* ---------- กล่องแจ้งเตือน SweetAlert2 (assets/notify.js) ธีมแบรนด์ · ไม่มีสีเขียว ---------- */
+.swal2-container {
+  --swal2-background:var(--surface); --swal2-color:var(--ink); --swal2-border-radius:14px; --swal2-border:1px solid var(--line);
+  --swal2-backdrop:rgba(11,20,28,.5); --swal2-width:30em; --swal2-outline:0 0 0 3px var(--blue-soft);
+  --swal2-input-background:var(--surface); --swal2-input-border:1px solid var(--line); --swal2-input-border-radius:8px;
+  --swal2-input-focus-border:1px solid var(--blue); --swal2-input-focus-box-shadow:0 0 0 3px var(--blue-soft);
+  --swal2-validation-message-background:var(--danger-soft); --swal2-validation-message-color:var(--danger);
+  --swal2-timer-progress-bar-background:#C8962E; --swal2-toast-box-shadow:var(--shadow);
+  font-family:var(--body);
+}
+.swal2-popup.tt-swal { font-family:var(--body); font-size:15px; padding-bottom:18px; }
+.tt-swal .swal2-title { font-family:var(--display); font-size:1.25rem; color:var(--ink); line-height:1.35; }
+.tt-swal .swal2-html-container { color:var(--ink); font-size:.95rem; line-height:1.7; text-align:left; }
+.tt-swal .swal2-html-container ul { margin:6px 0 0; padding-left:20px; }
+.tt-swal .swal2-actions { gap:8px; }
+.tt-swal .swal2-actions .btn { margin:0; }
+.tt-swal .swal2-input { font:inherit; width:auto; margin:10px 1.6em 4px; height:auto; padding:9px 12px; }
+.tt-swal-type { margin:12px 0 0; font-size:.9rem; color:var(--muted); }
+.btn.btn-swal-ok { background:#0F2438; border-color:#0F2438; color:#fff; font-weight:600; }
+.btn.btn-swal-ok:hover { background:#1F5FA8; border-color:#1F5FA8; }
+.btn.btn-swal-danger { background:var(--danger); border-color:var(--danger); color:#fff; font-weight:600; }
+.btn.btn-swal-deny { border-color:#C8962E; color:var(--ink); }
+.btn.btn-swal-deny:hover { background:var(--gold-soft); border-color:#C8962E; }
+/* ไอคอน: สำเร็จ = น้ำเงินโขง (ไม่ใช่เขียว) · เตือน = ทอง · ข้อมูล/คำถาม = น้ำเงิน · ผิดพลาด = แดงของระบบ */
+.swal2-icon.swal2-success { border-color:#1F5FA8 !important; color:#1F5FA8 !important; }
+.swal2-icon.swal2-success [class^=swal2-success-line] { background-color:#1F5FA8 !important; }
+.swal2-icon.swal2-success .swal2-success-ring { border-color:rgba(31,95,168,.3) !important; }
+.swal2-icon.swal2-warning { border-color:#C8962E !important; color:#C8962E !important; }
+.swal2-icon.swal2-info, .swal2-icon.swal2-question { border-color:#1F5FA8 !important; color:#1F5FA8 !important; }
+.swal2-icon.swal2-error { border-color:var(--danger) !important; color:var(--danger) !important; }
+.swal2-icon.swal2-error [class^=swal2-x-mark-line] { background-color:var(--danger) !important; }
+.swal2-loader { border-color:#1F5FA8 transparent #C8962E transparent !important; }
+/* toast มุมจอ */
+.swal2-popup.swal2-toast.tt-toast { font-size:14px; padding:8px 12px; border:1px solid var(--line); max-width:min(420px, calc(100vw - 24px)); }
+.swal2-toast.tt-toast .swal2-title { font-family:var(--body); font-size:.92rem; font-weight:500; margin:0 6px; }
+.swal2-toast.tt-toast .swal2-actions { margin:0 0 0 6px; }
+.swal2-toast.tt-status { opacity:.96; }
+.swal2-toast.tt-status .swal2-title { color:var(--muted); }
+.swal2-toast.tt-action { border-left:4px solid #C8962E; }
+@media (prefers-color-scheme: dark) {
+  .btn.btn-swal-ok { background:#1F5FA8; border-color:#1F5FA8; }
+  .btn.btn-swal-ok:hover { background:#2D72C2; border-color:#2D72C2; }
+  .btn.btn-swal-danger { color:#1A0906; }
+}
+/* toast สำรอง (ตอนโหลด SweetAlert2 ไม่ได้) มุมขวาล่าง มีปุ่มได้ เช่น เลิกทำ */
+.toast { position:fixed; right:16px; bottom:18px; background:var(--ink); color:var(--bg); padding:10px 16px; border-radius:10px; z-index:60; box-shadow:var(--shadow); max-width:min(420px, calc(100vw - 32px)); }
+@media (max-width:560px) { .toast { right:16px; left:16px; max-width:none; } }
+.toast .btn { margin-left:8px; background:var(--bg); color:var(--ink); }
+.tt-swal .swal2-input::placeholder { color:var(--muted); opacity:.7; }

@@ -1,11 +1,13 @@
 // สถานะกลางของเอกสารภาคเรียน + ตัวช่วยค้นหา + ตรวจชน (สำรอง ถ้า solver.js ยังไม่พร้อม)
-export const DAY_NAMES = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
+import { DAY_NAMES, fillSubjectPerWeek } from './rules.js';
+export { DAY_NAMES };
 export const SUBJECT_COLORS = ['#7FB0E8', '#E3B85A', '#F0A6BD', '#B69CE0', '#F2A65A', '#5FB3C9', '#E07A7A', '#9DB4C0', '#D4A5E8', '#C9B27C', '#8EA6E0', '#E8A0A0'];
 
 export const store = {
   termId: 0,
   version: 0,
   doc: null,
+  curriculum: null, // { รหัสวิชา: คาบ/สัปดาห์ } จาก data/curriculum.json (app.php ฝังมา) ใช้เติม subject.perWeek ให้ข้อมูลเก่า
   listeners: new Set(),
   onChange(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
   /** แก้เอกสาร แล้วแจ้งทุกหน้าจอ + ตั้งเวลาบันทึก */
@@ -53,11 +55,21 @@ function sanitize(d) {
       t.unavailable = Array.isArray(t.unavailable) ? t.unavailable.filter(Array.isArray).map(([x, y]) => [toInt(x), toInt(y)]) : [];
     }
   }
-  for (const s of d.subjects) if (s.color != null && !HEX.test(String(s.color))) s.color = SUBJECT_COLORS[0];
+  for (const s of d.subjects) {
+    if (s.color != null && !HEX.test(String(s.color))) s.color = SUBJECT_COLORS[0];
+    // คาบ/สัปดาห์ตามหลักสูตร: undefined = ข้อมูลเก่า (เติมจากหลักสูตรด้านล่าง) · null = ไม่ระบุ
+    if (s.perWeek != null) { const n = toInt(s.perWeek, -1); s.perWeek = n >= 1 ? Math.min(40, n) : null; }
+  }
+  fillSubjectPerWeek(d, store.curriculum);
   for (const a of d.assignments) {
     if (a.perWeek != null) a.perWeek = Math.max(0, toInt(a.perWeek));
     if (a.doubles != null) a.doubles = Math.max(0, toInt(a.doubles));
+    // แบ่งสอน: id กลุ่มเป็นข้อความสั้น ๆ เท่านั้น
+    if (a.split != null && !(typeof a.split === 'string' && /^[\w-]{1,40}$/.test(a.split))) delete a.split;
   }
+  // ค่าตั้งของภาคเรียน (แนวตาราง) — ข้อมูลเก่าไม่มี = วันเรียงลงล่าง
+  if (!d.settings || typeof d.settings !== 'object' || Array.isArray(d.settings)) d.settings = {};
+  if (d.settings.orientation !== 'periods' && d.settings.orientation !== 'days') d.settings.orientation = 'days';
   for (const x of [...d.locks, ...d.placements]) { x.day = toInt(x.day); x.period = toInt(x.period); }
 }
 

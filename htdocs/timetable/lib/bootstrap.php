@@ -52,9 +52,10 @@ function csp_nonce(): string {
 if (PHP_SAPI !== 'cli' && !headers_sent()) {
     $isHttps = !empty($_SERVER['HTTPS']) || ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
     // สคริปต์: ไฟล์ในเว็บเดียวกัน + cdnjs (pdfmake/ExcelJS) + inline ที่มี nonce เท่านั้น → HTML ที่ถูกฉีดเข้ามารันสคริปต์ไม่ได้
-    // style ยังต้อง 'unsafe-inline' (หน้าใช้ style="" และ <style> ฝังในหน้าเยอะ) · รูป: https: สำหรับรูปโปรไฟล์ Google/LINE
+    // style ยังต้อง 'unsafe-inline' (หน้าใช้ style="" และ <style> ฝังในหน้าเยอะ) + cdnjs เฉพาะ CSS ของ SweetAlert2 (มี SRI) · รูป: https: สำหรับรูปโปรไฟล์ Google/LINE
+    // วิดีโอคู่มือ (assets/guide/*.mp4) ใช้ default-src 'self' · ไม่มี 'unsafe-eval'
     header("Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-" . csp_nonce() . "' https://cdnjs.cloudflare.com; "
-        . "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' data: blob:; "
+        . "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' data: blob:; "
         . "worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
     header('X-Frame-Options: DENY');
     header('X-Content-Type-Options: nosniff');
@@ -127,11 +128,18 @@ function back_path(): string {
     return preg_match('#^[a-z]+\.php$#', $rel) ? $rel : 'index.php';
 }
 
-function flash(?string $msg = null): ?string {
-    if ($msg !== null) { $_SESSION['flash'] = $msg; return null; }
+/** ข้อความแจ้งครั้งเดียวข้ามหน้า · kind: info|ok|warn|error (หน้าแสดงด้วย SweetAlert2 ผ่าน flash_html()) */
+function flash(?string $msg = null, string $kind = 'warn'): ?string {
+    if ($msg !== null) { $_SESSION['flash'] = $msg; $_SESSION['flash_kind'] = $kind; return null; }
     $m = $_SESSION['flash'] ?? null;
-    unset($_SESSION['flash']);
+    $GLOBALS['FLASH_KIND'] = $_SESSION['flash_kind'] ?? 'warn';
+    unset($_SESSION['flash'], $_SESSION['flash_kind']);
     return $m;
+}
+/** ชนิดของข้อความที่ flash() อ่านล่าสุด */
+function flash_kind(): string {
+    $k = $GLOBALS['FLASH_KIND'] ?? 'warn';
+    return in_array($k, ['info', 'ok', 'warn', 'error'], true) ? $k : 'warn';
 }
 
 require __DIR__ . '/db.php';

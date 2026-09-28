@@ -13,7 +13,6 @@
 .tabs button[aria-selected="true"] { color:var(--ink); border-bottom-color:var(--gold-bg); }
 main { flex:1; }
 .tab { padding:16px; }
-.toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:10px 16px; border-radius:10px; z-index:60; box-shadow:var(--shadow); max-width:calc(100vw - 32px); }
 
 /* ---------- บอร์ด ---------- */
 .board { display:grid; grid-template-columns:260px minmax(0,1fr); gap:16px; align-items:start; }
@@ -138,3 +137,48 @@ main { flex:1; }
 .cur-levels input { margin:0 4px 0 0; }
 .cur-list { max-height:40vh; overflow:auto; border:1px solid var(--line); border-radius:8px; }
 .cur-list .table td { padding:5px 10px; font-size:.9rem; }
+
+/* ---------- การสอน: กันซ้ำ แบ่งสอน คาบตามหลักสูตร ---------- */
+.row-note { display:flex; flex-wrap:wrap; gap:4px; align-items:center; margin-top:4px; }
+.row-note .btn { padding:1px 10px; font-size:.8rem; }
+.pill.soft { color:var(--gold); border-color:#C8962E; background:var(--gold-soft); }
+.pill.split { color:var(--blue); border-color:var(--blue); background:var(--blue-soft); }
+.asg-table tr.split-row td:first-child { box-shadow:inset 3px 0 0 var(--blue); }
+.asg-table tr.dup-row td { background:var(--danger-soft); }
+.act-cell { white-space:nowrap; }
+.act-cell .btn + .btn { margin-left:4px; }
+.dup-note { padding:10px 14px; background:var(--danger-soft); border-bottom:1px solid var(--line); font-size:.9rem; }
+.pw-cell { white-space:nowrap; }
+.pw-hint { display:block; font-size:.74rem; color:var(--muted); margin-top:2px; }
+.data-head p b { color:var(--ink); }
+
+/* ---------- แนวตาราง: วันเรียงลงล่าง (แถว = วัน คอลัมน์ = คาบ) ---------- */
+.orient { display:inline-flex; align-items:center; gap:6px; }
+.orient .lbl { font-size:.85rem; color:var(--muted); }
+.seg.orient-seg button[aria-pressed="true"] { background:#1F5FA8; color:#fff; }
+.tt.by-day thead th { font-size:.82rem; }
+.tt.by-day thead th .tm { display:block; font-family:var(--mono); font-weight:400; color:var(--muted); font-size:.7rem; }
+.tt.by-day thead th.brk-col, .tt.by-day td.brk-col { width:34px; background:var(--brk); color:var(--muted); font-size:.74rem; padding:4px 2px; text-align:center; vertical-align:middle; }
+.tt.by-day td.brk-col span { writing-mode:vertical-rl; display:inline-block; }
+.tt.by-day tbody th { vertical-align:middle; font-size:.95rem; font-weight:600; color:var(--ink); }
+.tt.by-day td { height:72px; }
+.mini-grid.by-day button { width:16px; }
+.tt.lock-grid.by-day td { height:40px; }
+.tt.lock-grid.by-day td.brk-col { width:22px; }
+.export-orient { padding:14px 18px; margin-bottom:14px; display:flex; gap:12px 18px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+#ent-select { max-width:210px; }
+/* ตารางข้อมูลบนจอแคบ: ให้เลื่อนซ้าย-ขวาในกรอบ แทนการบีบช่องกรอกจนเหลือแค่ลูกศร */
+.data-card .scroll-x > .table { min-width:720px; }
+.data-card .scroll-x > .asg-table { min-width:980px; }
+.asg-table select[data-f="subjectId"] { min-width:190px; }
+.asg-table select[data-f="teacherId"] { min-width:160px; }
+.asg-table select[data-f="classId"] { min-width:84px; }
+.asg-table select[data-f="roomId"] { min-width:130px; }
+.tt .cell, .chip { -webkit-user-select:none; user-select:none; }
+/* โครงคาบ: ช่อง "ชนิด" (คาบเรียน/พัก) ต้องอ่านออก ไม่ถูกบีบเหลือแค่ลูกศร · จอแคบเลื่อนในกรอบ */
+#tab-periods .two-col { grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); }
+#tab-periods .two-col > .card:first-child .table { min-width:560px; }
+#tab-periods .two-col > .card:first-child .table td { padding:6px 6px; }
+#tab-periods .table select.input { min-width:106px; }
+#tab-periods .table input[type="time"] { min-width:100px; }
+@media (max-width:900px) { #tab-periods .two-col { grid-template-columns:minmax(0,1fr); } }

@@ -10,6 +10,7 @@ if (!$u) redirect('index.php');
 if ($u['school_id']) redirect('app.php');
 
 $error = flash(); // เช่น แจ้งหมดเวลาจาก csrf_check() แล้วให้กดใหม่
+$errorKind = flash_kind();
 $v = ['name' => '', 'code' => '', 'tambon' => '', 'amphoe' => '', 'province' => '', 'template' => 'sample', 'band' => 'primary'];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     csrf_check();
@@ -19,6 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ตรวจชุดเดียวกับแก้ข้อมูลโรงเรียนใน api.php (รวมความยาวตำบล/อำเภอ/รหัส — SQLite ไม่บังคับความยาว VARCHAR เอง)
     $s = $v;
     $error = validate_school($s);
+    $errorKind = 'warn';
     if (!$error) {
         db_tx(function () use ($s, $u, $v) {
             db_exec('INSERT INTO schools (name, school_code, tambon, amphoe, province, created_at) VALUES (?,?,?,?,?,?)',
@@ -27,6 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db_exec('UPDATE users SET school_id = ?, role = ? WHERE id = ?', [$sid, 'owner', $u['id']]);
             create_term($sid, (int) $u['id'], $v['template'], 'ภาคเรียนที่ 1/' . ((int) date('Y') + 543), $v['template'] === 'blank' ? $v['band'] : null);
         });
+        flash('ลงทะเบียนโรงเรียนแล้ว เริ่มจัดตารางได้เลย', 'ok');
         redirect('app.php');
     }
 }
@@ -55,7 +58,7 @@ page_head('ลงทะเบียนโรงเรียน · ตารา�
       <?php if ($u['avatar']): ?><img src="<?= h($u['avatar']) ?>" alt=""><?php endif; ?>
       <span>เข้าสู่ระบบเป็น <b><?= h($u['name'] ?: 'ผู้ใช้') ?></b> ผ่าน <?= $u['provider'] === 'line' ? 'LINE' : 'Google' ?></span>
     </div>
-    <?php if ($error): ?><div class="flash"><?= h($error) ?></div><?php endif; ?>
+    <?php if ($error): ?><div class="flash" data-flash role="alert"><?= h($error) ?></div><?php endif; ?>
     <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
     <input type="hidden" name="code" id="code" value="<?= h($v['code']) ?>">
 
@@ -112,4 +115,5 @@ const syncBand = () => { $('band-field').hidden = document.querySelector('input[
 document.querySelectorAll('input[name=template]').forEach((r) => r.addEventListener('change', syncBand));
 syncBand();
 </script>
+<?= flash_script($error, $errorKind) ?>
 <?php page_foot();
