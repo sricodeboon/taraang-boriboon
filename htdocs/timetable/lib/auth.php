@@ -56,6 +56,20 @@ function require_school(bool $json = false): array {
 
 function is_owner(array $u): bool { return ($u['role'] ?? '') === 'owner'; }
 
+/** อีเมลผู้ดูแลระบบ (ตัวพิมพ์เล็ก) · ตั้งทับได้ด้วย 'admin_emails' ใน config.php */
+function admin_emails(): array {
+    $list = cfg('admin_emails');
+    if (!is_array($list) || !$list) $list = ['sricodeboon@gmail.com', 'dev.nathom@gmail.com'];
+    return array_values(array_unique(array_filter(array_map(fn($e) => strtolower(trim((string) $e)), $list))));
+}
+
+/** ผู้ดูแลระบบ = ล็อกอินด้วย Google เท่านั้น (อีเมล gmail ยืนยันโดย Google) และอีเมลอยู่ในรายการ · LINE/โหมดทดลองไม่นับ */
+function is_admin(?array $u): bool {
+    if (!$u || ($u['provider'] ?? '') !== 'google') return false;
+    $email = strtolower(trim((string) ($u['email'] ?? '')));
+    return $email !== '' && in_array($email, admin_emails(), true);
+}
+
 /** ข้อมูลโรงเรียนที่ส่งให้หน้าเว็บ (ไม่มีตัวรูปโลโก้) */
 function school_public(array $s): array {
     return [

@@ -146,3 +146,31 @@ export function assignmentLabel(a) {
   const s = idx.subj.get(a.subjectId), c = idx.cls.get(a.classId), t = idx.tch.get(a.teacherId), r = a.roomId ? idx.room.get(a.roomId) : null;
   return { subj: s, cls: c, tch: t, room: r, color: s?.color || '#7FB0E8', name: s ? s.name : '(ไม่มีวิชา)', code: s?.code || '' };
 }
+
+// ---------- รวมการแก้ไขเมื่อบันทึกชนกัน (409) / กู้ฉบับร่าง — ใช้ใน app.js และทดสอบใน tests/merge.test.mjs ----------
+const byId = (arr) => Array.isArray(arr) && arr.every((x) => x && typeof x === 'object' && typeof x.id === 'string');
+/**
+ * รวม 3 ทาง: รายการที่มี id (ห้อง ครู วิชา ห้องพิเศษ การสอน) เทียบทีละรายการ ส่วนอื่น (โครงคาบ คาบล็อก ตาราง) เทียบทั้งหมวด
+ * แก้ฝั่งเดียว = เอาฝั่งนั้น (รวมการเพิ่ม/ลบ) · แก้ทั้งสองฝั่งต่างกัน = ชน → prefer ('mine'|'theirs') ตัดสิน, null = ยังไม่ตัดสิน (นับไว้ถาม)
+ * คืน { merged, clashes: [ชื่อหมวดที่ชน] }
+ */
+export function merge3(base, mine, theirs, prefer = null) {
+  const J = (x) => JSON.stringify(x);
+  const out = {}, clashes = new Set();
+  const pick = (k, b, m, t) => {
+    const bj = J(b), mj = J(m), tj = J(t);
+    if (mj === tj || mj === bj) return t;
+    if (tj === bj) return m;
+    clashes.add(k);
+    return prefer === 'theirs' ? t : m;
+  };
+  for (const k of new Set([...Object.keys(mine || {}), ...Object.keys(theirs || {})])) {
+    const b = base?.[k], m = mine?.[k], t = theirs?.[k];
+    if (byId(m) && byId(t) && (b === undefined || byId(b))) {
+      const B = new Map((b || []).map((x) => [x.id, x])), M = new Map(m.map((x) => [x.id, x])), T = new Map(t.map((x) => [x.id, x]));
+      const ids = [...t.map((x) => x.id), ...m.map((x) => x.id).filter((id) => !T.has(id))];
+      out[k] = ids.map((id) => pick(k, B.get(id), M.get(id), T.get(id))).filter(Boolean);
+    } else out[k] = pick(k, b, m, t);
+  }
+  return { merged: out, clashes: [...clashes] };
+}

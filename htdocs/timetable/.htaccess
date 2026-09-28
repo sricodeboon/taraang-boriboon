@@ -12,3 +12,20 @@ RedirectMatch 404 /\.
     Header always set X-Content-Type-Options "nosniff"
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
 </IfModule>
+
+# แคชไฟล์คงที่ในเบราว์เซอร์ (โฮสต์ฟรีนับทุก request เป็น hit รวม 304 → max-age ทำให้ไม่ต้องถามเซิร์ฟเวอร์ซ้ำเลย)
+# - FilesMatch ดูชื่อไฟล์จริง: api.php/logo.php ไม่โดน (PHP ตั้ง Cache-Control เอง)
+# - js/css ที่หน้าเรียกมี ?v=เวลาแก้ไฟล์ (import map ใน app.php, worker ใช้ import.meta.resolve) อัปเดตแล้วได้ไฟล์ใหม่ทันที
+#   แต่เบราว์เซอร์เก่าที่ไม่รองรับ import map จะโหลดโมดูลแบบไม่มี ?v → คงไว้ 7 วันเท่าเดิม ไม่ให้ไฟล์เก่าปนนานเกิน
+# - data/*.json (หลักสูตร/รายชื่อโรงเรียน) เปลี่ยนน้อย แคช 1 วัน · ฟอนต์ PDF (.ttf) 30 วัน
+<IfModule mod_headers.c>
+    <FilesMatch "\.(js|mjs|css)$">
+        Header set Cache-Control "public, max-age=604800"
+    </FilesMatch>
+    <FilesMatch "\.json$">
+        Header set Cache-Control "public, max-age=86400"
+    </FilesMatch>
+    <FilesMatch "\.(ttf|woff2|png|jpg|svg|ico)$">
+        Header set Cache-Control "public, max-age=2592000"
+    </FilesMatch>
+</IfModule>

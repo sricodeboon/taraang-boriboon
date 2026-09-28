@@ -11,6 +11,9 @@ const SECTIONS = [
   ['classes', 'ห้องเรียน'], ['teachers', 'ครู'], ['subjects', 'วิชา'], ['rooms', 'ห้องพิเศษ'], ['assignments', 'การสอน'], ['school', 'โรงเรียน'],
 ];
 
+/** เปิดหมวดข้อมูลที่ต้องการ (จากปุ่ม "ไปแก้ที่…" ในรายงานผลการจัด) */
+export function setSection(k) { if (SECTIONS.some(([x]) => x === k)) section = k; }
+
 export function render(el) {
   root = el;
   const d = store.doc;
@@ -215,9 +218,10 @@ function assignmentsView(el) {
     }).join('') || '<tr><td colspan="8" class="muted">ยังไม่มีการสอน</td></tr>'}</tbody></table></div>
     ${summary()}`;
   el.querySelector('#flt').addEventListener('change', (e) => { filterClass = e.target.value; render(root); });
+  el.querySelector('[data-go-board]')?.addEventListener('click', () => document.dispatchEvent(new CustomEvent('tt:goto', { detail: { tab: 'board' } })));
   el.querySelector('[data-add]').addEventListener('click', () => {
     if (!ready) { alert('เพิ่มห้องเรียน ครู และวิชาอย่างน้อยอย่างละ 1 รายการก่อน'); return; }
-    all.push({ id: uid('a'), classId: filterClass || d.classes[0].id, subjectId: d.subjects[0].id, teacherId: d.teachers[0].id, roomId: null, perWeek: 2, doubles: 0 });
+    all.push({ id: uid('a'), ...guessNew(filterClass || d.classes[0].id), roomId: null, perWeek: 2, doubles: 0 });
     store.commit('data'); render(root);
   });
   bindInputs(el, all, { numeric: ['perWeek', 'doubles'], after: (row, f) => {
@@ -231,9 +235,31 @@ function assignmentsView(el) {
   });
 }
 
+/**
+ * ค่าเริ่มต้นของการสอนใหม่: วิชาถัดไปของชั้นนี้ที่ยังไม่ได้มอบหมาย + ครูที่สอนห้องนี้มากที่สุด (ครูประจำชั้น)
+ * เดิมเริ่มที่วิชาแรกของทั้งรายการ + ครูคนแรกเสมอ → ต้องเปลี่ยน 2 ช่องทุกแถว และถ้าลืมเปลี่ยน ครูคนแรกภาระล้นจนจัดไม่ครบ
+ */
+function guessNew(classId) {
+  const d = store.doc;
+  const cls = d.classes.find((c) => c.id === classId);
+  const mine = d.assignments.filter((a) => a.classId === classId);
+  const used = new Set(mine.map((a) => a.subjectId));
+  const level = (cls?.level || cls?.name || '').trim().split('/')[0];
+  const free = d.subjects.filter((s) => !used.has(s.id));
+  const sameLevel = level ? free.filter((s) => (s.name || '').trim().endsWith(' ' + level)) : [];
+  const subject = sameLevel[0] || free[0] || d.subjects[0];
+  const count = new Map();
+  for (const a of mine) count.set(a.teacherId, (count.get(a.teacherId) || 0) + 1);
+  const top = [...count].sort((x, y) => y[1] - x[1])[0]?.[0];
+  return { classId, subjectId: subject.id, teacherId: idx.tch.has(top) ? top : d.teachers[0].id };
+}
+
 function summary() {
   const d = store.doc;
   const total = d.assignments.reduce((s, a) => s + (a.perWeek || 0), 0);
   const placed = d.placements.length;
-  return `<div class="sum-bar"><span>การสอนทั้งหมด <b>${d.assignments.length}</b> รายการ</span><span>รวม <b>${total}</b> คาบ/สัปดาห์</span><span>จัดลงตารางแล้ว <b>${placed}</b> คาบ</span></div>`;
+  // ผู้ใช้กรอกการสอนครบแล้วมักไม่รู้ว่าต้องไปกด "จัดอัตโนมัติ" ที่แท็บจัดตาราง → มีปุ่มพาไปตรงนี้
+  const next = d.assignments.length && placed < total
+    ? `<button class="btn btn-primary btn-sm" data-go-board style="margin-left:auto">ขั้นต่อไป: ไปจัดตาราง →</button>` : '';
+  return `<div class="sum-bar"><span>การสอนทั้งหมด <b>${d.assignments.length}</b> รายการ</span><span>รวม <b>${total}</b> คาบ/สัปดาห์</span><span>จัดลงตารางแล้ว <b>${placed}</b> คาบ</span>${next}</div>`;
 }

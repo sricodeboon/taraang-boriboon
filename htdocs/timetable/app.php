@@ -10,8 +10,8 @@ $js = fn($v) => json_encode($v, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX
 $v = fn(string $f) => @filemtime(APP_ROOT . '/' . $f);
 
 // import map: ทุกโมดูลได้ ?v=เวลาแก้ไฟล์ — อัปโหลดเวอร์ชันใหม่แล้วเบราว์เซอร์ไม่ใช้ไฟล์เก่าจากแคชปนกับของใหม่
-// (import './data.js' ภายในโมดูลถูกแมปผ่าน URL เต็มจึงได้เวอร์ชันด้วย)
-$mods = ['store.js', 'ui.js', 'board.js', 'data.js', 'periods.js', 'export.js', 'school.js', 'geo.js', 'curriculum.js', 'pdf.js', 'solver/solver.js'];
+// (import './data.js' ภายในโมดูลถูกแมปผ่าน URL เต็มจึงได้เวอร์ชันด้วย · worker ใช้ import.meta.resolve() อ่านเวอร์ชันจาก map นี้)
+$mods = ['store.js', 'ui.js', 'board.js', 'data.js', 'periods.js', 'export.js', 'school.js', 'geo.js', 'curriculum.js', 'pdf.js', 'solver/solver.js', 'solver/solver.worker.js'];
 $map = [];
 foreach ($mods as $m) $map['./assets/' . $m] = './assets/' . $m . '?v=' . $v('assets/' . $m);
 $importMap = '<script type="importmap" nonce="' . csp_nonce() . '">' . $js(['imports' => $map]) . '</script>';
@@ -29,6 +29,7 @@ page_head('จัดตาราง · ' . $school['name'], '<style>' . file_get
     </div>
     <span id="save-state" class="pill" aria-live="polite">กำลังโหลด…</span>
     <div class="bar-user">
+      <?php if (is_admin($user)): ?><a class="btn btn-sm" href="admin.php">ผู้ดูแลระบบ</a><?php endif; ?>
       <a class="btn btn-sm" href="guide.php" target="_blank" rel="noopener">คู่มือ</a>
       <form method="post" action="auth/logout.php">
         <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">

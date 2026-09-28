@@ -10,7 +10,8 @@ let selected = { class: null, teacher: null, room: null };
 let validator = null;       // validate() จาก solver.js ถ้ามี
 let conflicts = [];
 let solving = null;          // Worker ที่กำลังจัด
-let lastSolve = null;        // { sec, full } ผลการจัดอัตโนมัติครั้งล่าสุด แสดงค้างในแถบเครื่องมือ
+let lastSolve = null;        // { termId, sec, placed, unplaced[], warnings[], error } ผลการจัดครั้งล่าสุด แสดงค้างเหนือตาราง
+let hideReport = false;      // ผู้ใช้กดปิดกล่องรายงานผลการจัด
 let root = null;
 
 // validate() จาก solver.js (60KB) โหลดหลังหน้าแสดงผลแล้ว ระหว่างนั้นใช้ localValidate() ใน store.js
@@ -89,12 +90,13 @@ export function render(el) {
       </select>
       <span class="pill ${hard ? 'warn' : 'ok'}" title="จำนวนจุดที่ชนทั้งโรงเรียน">${hard ? `ชน ${hard} จุด` : 'ไม่มีจุดชน'}</span>
       <span class="pill">เหลือจัด ${totalLeft} คาบ</span>
-      ${lastSolve ? `<span class="pill" title="เวลาที่ใช้จัดอัตโนมัติครั้งล่าสุด">จัดล่าสุด ${lastSolve.sec} วินาที</span>` : ''}
+      ${lastSolve?.sec ? `<span class="pill" title="เวลาที่ใช้จัดอัตโนมัติครั้งล่าสุด">จัดล่าสุด ${lastSolve.sec} วินาที</span>` : ''}
       <span class="spacer"></span>
       <div class="progress" id="solve-progress" hidden><i></i></div>
       <button class="btn btn-sm" id="clear-auto" title="ลบคาบที่ไม่ได้ปักหมุดทั้งโรงเรียน">ล้างที่ไม่ปักหมุด</button>
       <button class="btn btn-primary btn-sm" id="auto-solve">${solving ? 'หยุดจัด' : 'จัดอัตโนมัติ'}</button>
     </div>
+    ${guideHTML(totalLeft)}
     <div class="board">
       <aside class="card palette" id="palette">${paletteHTML(id)}</aside>
       <div>
@@ -106,6 +108,9 @@ export function render(el) {
   el.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => { view = b.dataset.view; render(el); }));
   el.querySelector('#ent-select')?.addEventListener('change', (e) => { selected[view] = e.target.value; render(el); });
   el.querySelector('#auto-solve').addEventListener('click', autoSolve);
+  el.querySelector('#auto-solve-2')?.addEventListener('click', autoSolve);
+  el.querySelector('#solve-report-close')?.addEventListener('click', () => { hideReport = true; render(el); });
+  el.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => gotoData(b.dataset.goto)));
   el.querySelector('#clear-auto').addEventListener('click', () => {
     const before = d.placements.length;
     d.placements = d.placements.filter((p) => p.pinned);
@@ -265,39 +270,208 @@ function openMenu(cellEl, pl) {
   });
 }
 
+// ---------- ความพร้อมก่อนจัด + รายงานผลการจัด ----------
+// ผู้ใช้จริงคนแรกกรอกข้อมูลครบแต่ไม่มีคาบถูกวางเลย และเดิมเหตุผลที่ solver ส่งกลับมา (unplaced[].reason) ไม่ถูกแสดงที่ไหนเลย
+// → แสดงกล่องบอก "ขั้นต่อไป" + ตรวจความจุล่วงหน้า และหลังจัดแสดงสาเหตุ/วิธีแก้ค้างไว้เหนือตาราง (ไม่ใช่ toast 3 วินาที)
+
+/** ตรวจความจุแบบเร็ว (ชุดเดียวกับที่ solver ใช้ตัดสินว่าจัดไม่ครบแน่นอน) → รายการปัญหาพร้อมวิธีแก้ */
+export function readiness() {
+  const d = store.doc, days = d.term.days, P = d.term.periods.length;
+  const out = [];
+  const skipped = d.assignments.filter((a) => !idx.cls.has(a.classId) || !idx.tch.has(a.teacherId));
+  if (skipped.length) out.push({ text: `การสอน ${skipped.length} รายการยังไม่ได้เลือกห้องเรียนหรือครู จึงไม่ถูกนำไปจัด`, fix: 'เลือกห้องเรียนและครูให้ครบ', goto: 'assignments' });
+  const zero = d.assignments.filter((a) => !(a.perWeek > 0)).length;
+  if (zero) out.push({ text: `การสอน ${zero} รายการตั้งคาบ/สัปดาห์เป็น 0`, fix: 'ใส่จำนวนคาบต่อสัปดาห์', goto: 'assignments' });
+  const globalLock = (day, p) => d.locks.some((l) => l.classId == null && l.day === day && l.period === p);
+  for (const c of d.classes) {
+    const need = d.assignments.filter((a) => a.classId === c.id && idx.tch.has(a.teacherId)).reduce((s, a) => s + (a.perWeek || 0), 0);
+    let free = 0;
+    for (let day = 0; day < days; day++) for (let p = 0; p < P; p++) if (!isBreak(p) && !lockAt(c.id, day, p)) free++;
+    if (need > free) out.push({ text: `${c.name} ต้องเรียนรวม ${need} คาบ/สัปดาห์ แต่มีช่องว่างเพียง ${free} คาบ`, fix: `ลดคาบ/สัปดาห์ของ ${c.name} ลง ${need - free} คาบ หรือเพิ่มคาบต่อวัน/ลดคาบล็อกในแท็บโครงคาบ`, goto: 'assignments' });
+  }
+  for (const t of d.teachers) {
+    const need = d.assignments.filter((a) => a.teacherId === t.id && idx.cls.has(a.classId)).reduce((s, a) => s + (a.perWeek || 0), 0);
+    if (!need) continue;
+    let cap = 0;
+    for (let day = 0; day < days; day++) {
+      let n = 0;
+      for (let p = 0; p < P; p++) if (!isBreak(p) && !globalLock(day, p) && !teacherUnavailable(t.id, day, p)) n++;
+      cap += t.maxPerDay ? Math.min(n, t.maxPerDay) : n;
+    }
+    if (need > cap) {
+      const unav = (t.unavailable || []).length;
+      out.push({ text: `${t.name} ต้องสอน ${need} คาบ/สัปดาห์ แต่สอนได้สูงสุด ${cap} คาบ (สูงสุด ${t.maxPerDay || 'ไม่จำกัด'} คาบ/วัน${unav ? `, ไม่ว่าง ${unav} ช่อง` : ''})`,
+        fix: `เพิ่ม “สูงสุด/วัน” ของครู${unav ? ' ลดช่องไม่ว่าง (สีแดง)' : ''} หรือย้ายบางวิชาไปให้ครูคนอื่น`, goto: 'teachers' });
+    }
+  }
+  return out;
+}
+
+/** วิธีแก้ตามเหตุผลที่ solver ส่งมา (ข้อความจาก explainUnit/เหตุผลอื่นใน solver.js) */
+function fixFor(reason) {
+  const r = String(reason || '');
+  if (/ต้องเรียนรวม/.test(r)) return ['ลดคาบ/สัปดาห์ของห้องนี้ หรือเพิ่มคาบต่อวัน/ลดคาบล็อก (แท็บโครงคาบ)', 'assignments'];
+  if (/สอนได้สูงสุด|สอนได้วันละ/.test(r)) return ['เพิ่ม “สูงสุด/วัน” ของครู ลดช่องไม่ว่าง หรือย้ายบางวิชาไปให้ครูคนอื่น', 'teachers'];
+  if (/คาบคู่/.test(r)) return ['ลดจำนวนคาบคู่ของวิชานี้ (แท็บข้อมูล → การสอน) หรือเลิกปักหมุดคาบคู่ที่ค้างครึ่งเดียว', 'assignments'];
+  if (/ไม่มีคาบที่ครูว่าง/.test(r)) return ['ตรวจช่อง “คาบไม่ว่าง” ของครู (ช่องสีแดง = ครูไม่ว่าง ไม่ใช่คาบที่สอน) และคาบล็อกที่ปิดทุกช่อง', 'teachers'];
+  if (/ห้องพิเศษ|ถูกใช้/.test(r)) return ['เพิ่มห้องพิเศษอีกห้อง หรือเลิกผูกห้องพิเศษกับบางวิชา', 'rooms'];
+  if (/ไม่พบห้องเรียน/.test(r)) return ['เลือกห้องเรียนของการสอนนี้ใหม่', 'assignments'];
+  return ['กด “จัดอัตโนมัติ” อีกครั้ง (ระบบสุ่มลำดับใหม่ทุกครั้ง) หรือเลิกปักหมุดบางคาบ แล้วลากวางส่วนที่เหลือเอง', null];
+}
+
+const SEC_NAME = { assignments: 'การสอน', teachers: 'ครู', rooms: 'ห้องพิเศษ', classes: 'ห้องเรียน' };
+const gotoBtn = (k) => (k ? ` <button class="btn btn-sm" data-goto="${k}">ไปแก้ที่ ข้อมูล → ${SEC_NAME[k]}</button>` : '');
+
+function gotoData(sec) {
+  document.dispatchEvent(new CustomEvent('tt:goto', { detail: { tab: 'data', section: sec } }));
+}
+
+function guideHTML(totalLeft) {
+  const d = store.doc;
+  if (lastSolve && lastSolve.termId === store.termId && !hideReport) return solveReportHTML();
+  if (!d.assignments.length) {
+    return `<div class="card callout"><b>เริ่มต้นใน 4 ขั้น</b><ol>
+      <li>แท็บ <b>ข้อมูล</b> → เพิ่มห้องเรียน และครู</li><li>ข้อมูล → <b>การสอน</b>: จับคู่ วิชา × ห้อง × ครู และจำนวนคาบ/สัปดาห์</li>
+      <li>แท็บ <b>โครงคาบ · คาบล็อก</b>: ตั้งเวลาเรียน และล็อกคาบกิจกรรม (ถ้ามี)</li><li>กลับมาหน้านี้แล้วกด <b>จัดอัตโนมัติ</b></li></ol>
+      <p class="muted" style="margin:6px 0 0">มีภาคเรียนก่อนหน้าแล้ว? เลือก “＋ สร้างภาคเรียนใหม่…” ที่หัวจอ แล้วเลือกแบบ “สำเนาจาก…” ครู วิชา และการสอนจะตามมาครบ ไม่ต้องกรอกใหม่</p></div>`;
+  }
+  const issues = readiness();
+  if (!totalLeft && !issues.length) return '';
+  const list = issues.length ? `<ul>${issues.map((x) => `<li>${esc(x.text)}<br><span class="fix">วิธีแก้: ${esc(x.fix)}</span>${gotoBtn(x.goto)}</li>`).join('')}</ul>` : '';
+  if (!d.placements.length) {
+    const total = d.assignments.reduce((s, a) => s + (a.perWeek || 0), 0);
+    return `<div class="card callout ${issues.length ? 'warn' : 'go'}">
+      <div class="callout-head"><b>ข้อมูลพร้อมแล้ว: การสอน ${d.assignments.length} รายการ รวม ${total} คาบ/สัปดาห์ · ยังไม่ได้วางลงตาราง</b>
+      <button class="btn btn-primary btn-sm" id="auto-solve-2">จัดอัตโนมัติเลย</button></div>
+      <p style="margin:4px 0 0">ขั้นต่อไป: กด <b>จัดอัตโนมัติ</b> ระบบจะวางทุกวิชาให้ภายในไม่กี่วินาที หรือลากวิชาจากรายการ “วิชาที่ต้องจัด” ไปวางในตารางเอง</p>
+      ${issues.length ? `<p style="margin:8px 0 0"><b style="color:var(--danger)">ตรวจพบ ${issues.length} จุดที่ทำให้จัดได้ไม่ครบ</b> (จัดได้ แต่จะเหลือบางคาบ)</p>${list}` : ''}</div>`;
+  }
+  return issues.length ? `<div class="card callout warn"><b>ตรวจพบ ${issues.length} จุดที่ทำให้จัดได้ไม่ครบ</b>${list}</div>` : '';
+}
+
+function solveReportHTML() {
+  const s = lastSolve;
+  const close = '<button class="btn btn-sm" id="solve-report-close" aria-label="ปิดรายงาน">ปิด</button>';
+  if (s.error) return `<div class="card callout warn"><div class="callout-head"><b>จัดอัตโนมัติไม่สำเร็จ</b>${close}</div><p style="margin:4px 0 0">${esc(s.error)}</p></div>`;
+  const miss = s.unplaced.reduce((n, u) => n + (u.remaining || 0), 0);
+  const skipped = s.skipped ? `<li>การสอน ${s.skipped} รายการยังไม่ได้เลือกห้องเรียนหรือครู จึงไม่ถูกนำไปจัด${gotoBtn('assignments')}</li>` : '';
+  if (!miss && !s.skipped) {
+    return `<div class="card callout go"><div class="callout-head"><b>จัดครบทุกคาบแล้ว ${s.placed} คาบ ไม่มีคาบชน</b>${close}</div>
+      <p style="margin:4px 0 0">ใช้เวลา ${s.sec} วินาที · ลากคาบเพื่อปรับได้ (คาบที่ลากเองจะปักหมุด) · พร้อมพิมพ์ที่แท็บ <b>ส่งออก</b></p></div>`;
+  }
+  // รวมตามเหตุผล: เหตุผลเดียวกันแสดงครั้งเดียว พร้อมรายชื่อห้อง/วิชาที่เกี่ยวข้อง
+  const groups = new Map();
+  for (const u of s.unplaced) {
+    const a = idx.asg.get(u.assignmentId);
+    const L = a ? assignmentLabel(a) : null;
+    const g = groups.get(u.reason) || { n: 0, items: [] };
+    g.n += u.remaining || 0;
+    g.items.push(L ? `${L.cls?.name || ''} ${L.name} (${u.remaining})` : `${u.assignmentId} (${u.remaining})`);
+    groups.set(u.reason, g);
+  }
+  const rows = [...groups].sort((x, y) => y[1].n - x[1].n).slice(0, 8).map(([reason, g]) => {
+    const [fix, goto] = fixFor(reason);
+    const names = g.items.slice(0, 6).join(', ') + (g.items.length > 6 ? ` และอีก ${g.items.length - 6} รายการ` : '');
+    return `<li><b>${esc(reason)}</b> — ${g.n} คาบ<br><span class="muted">${esc(names)}</span><br><span class="fix">วิธีแก้: ${esc(fix)}</span>${gotoBtn(goto)}</li>`;
+  }).join('');
+  const head = s.placed ? `จัดได้ ${s.placed} คาบ · วางไม่ลง ${miss} คาบ` : `ยังวางคาบไม่ได้เลย (วางไม่ลง ${miss} คาบ)`;
+  return `<div class="card callout warn"><div class="callout-head"><b>${head}</b>${close}</div>
+    <p style="margin:4px 0 0">สาเหตุและวิธีแก้ด้านล่าง แก้แล้วกด <b>จัดอัตโนมัติ</b> อีกครั้ง — คาบที่วางได้แล้วยังอยู่ ลากวางส่วนที่เหลือเองก็ได้</p>
+    <ul>${skipped}${rows}</ul>${groups.size > 8 ? `<p class="muted" style="margin:0">และอีก ${groups.size - 8} สาเหตุ</p>` : ''}</div>`;
+}
+
 // ---------- จัดอัตโนมัติ (Web Worker) ----------
 const secText = (ms) => (ms / 1000).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const SOLVE_OPTS = () => ({ timeLimitMs: 6000, seed: Date.now() % 100000 });
+
+/** URL ของ worker พร้อมเลขเวอร์ชัน (import map ใช้กับ new Worker ไม่ได้ ต้อง resolve เอง) + ส่งเวอร์ชันของ solver.js ให้ worker import ไฟล์ใหม่ */
+function workerURL() {
+  let w = null, sv = null;
+  try { w = import.meta.resolve('./solver/solver.worker.js'); sv = new URL(import.meta.resolve('./solver/solver.js')).searchParams.get('v'); } catch { /* เบราว์เซอร์เก่า */ }
+  const u = new URL(w || './solver/solver.worker.js', import.meta.url);
+  if (sv && /^\d+$/.test(sv)) u.searchParams.set('sv', sv);
+  return u;
+}
 
 function autoSolve() {
   if (solving) { solving.terminate(); solving = null; render(root); toast('หยุดการจัดอัตโนมัติ'); return; }
   const input = solverInput(true);
-  if (!input.assignments.length) { toast('ยังไม่มีการสอนให้จัด เพิ่มที่แท็บข้อมูลก่อน'); return; }
-  let worker;
-  try { worker = new Worker(new URL('./solver/solver.worker.js', import.meta.url), { type: 'module' }); }
-  catch (e) { toast('เบราว์เซอร์นี้ไม่รองรับการจัดอัตโนมัติ'); return; }
+  const skipped = store.doc.assignments.length - input.assignments.length;
+  hideReport = false;
+  if (!input.assignments.length) {
+    lastSolve = { termId: store.termId, error: store.doc.assignments.length
+      ? 'การสอนทุกรายการยังไม่ได้เลือกห้องเรียนหรือครู ไปที่แท็บข้อมูล → การสอน แล้วเลือกให้ครบ'
+      : 'ยังไม่มีการสอนให้จัด ไปที่แท็บข้อมูล → การสอน เพื่อจับคู่วิชา ห้อง และครูก่อน' };
+    render(root); toast(lastSolve.error, 6000); return;
+  }
+  const t0 = performance.now(); // นับตั้งแต่กดจนได้ผล (รวมเวลาเปิด worker) = เวลาที่ผู้ใช้รอจริง
+  const opts = SOLVE_OPTS();
+  let worker = null;
+  try { worker = new Worker(workerURL(), { type: 'module' }); } catch (e) { console.warn('เปิด worker ไม่ได้', e); }
+  if (!worker) { solveInPage(input, opts, t0, skipped); return; }
   solving = worker;
   render(root);
   const bar = root.querySelector('#solve-progress');
   bar.hidden = false;
   toast('กำลังจัดตาราง… ปักหมุดไว้จะไม่ถูกย้าย');
-  const t0 = performance.now(); // นับตั้งแต่กดจนได้ผล (รวมเวลาเปิด worker) = เวลาที่ผู้ใช้รอจริง
+  let heard = false;
+  const stop = () => { clearTimeout(silent); clearTimeout(hard); worker.terminate(); if (solving === worker) solving = null; };
+  // เบราว์เซอร์ที่ไม่รองรับ module worker บางตัวไม่ error แต่เงียบไปเลย → 8 วิไม่มีข่าว = จัดในหน้าแทน
+  const silent = setTimeout(() => { if (!heard) { stop(); solveInPage(input, opts, t0, skipped); } }, 8000);
+  const hard = setTimeout(() => { stop(); failSolve('ตัวจัดตารางไม่ตอบกลับภายในเวลาที่กำหนด กรุณาลองกดอีกครั้ง หรือรีเฟรชหน้า'); }, opts.timeLimitMs + 20000);
   worker.onmessage = (ev) => {
+    heard = true;
     const msg = ev.data || {};
     if (msg.type === 'progress') { bar.firstElementChild.style.width = Math.round((msg.pct || 0) * 100) + '%'; return; }
-    if (msg.type === 'done') {
-      worker.terminate(); solving = null;
-      const pinnedKey = new Set(store.doc.placements.filter((p) => p.pinned).map((p) => `${p.assignmentId}|${p.day}|${p.period}`));
-      const sec = secText(performance.now() - t0);
-      store.doc.placements = (msg.result.placements || []).map((p) => ({
-        assignmentId: p.assignmentId, day: p.day, period: p.period, pinned: pinnedKey.has(`${p.assignmentId}|${p.day}|${p.period}`),
-      }));
-      const miss = (msg.result.unplaced || []).reduce((s, u) => s + (u.remaining || 0), 0);
-      lastSolve = { sec, full: !miss };
-      store.commit('solve');
-      toast(miss ? `จัดเสร็จใน ${sec} วินาที · เหลือ ${miss} คาบที่วางไม่ลง ดูรายการในแต่ละห้อง` : `จัดครบทุกคาบแล้ว ใช้เวลา ${sec} วินาที`);
-    }
-    if (msg.type === 'error') { worker.terminate(); solving = null; render(root); toast('จัดอัตโนมัติไม่สำเร็จ: ' + (msg.message || '')); }
+    if (msg.type === 'done') { stop(); applyResult(msg.result, t0, skipped); }
+    if (msg.type === 'error') { stop(); failSolve('ตัวจัดตารางทำงานผิดพลาด: ' + (msg.message || 'ไม่ทราบสาเหตุ') + ' — กรุณาส่งไฟล์สำรอง (แท็บส่งออก) ให้ผู้ดูแลตรวจสอบ'); }
   };
-  worker.onerror = (e) => { worker.terminate(); solving = null; render(root); toast('ตัวจัดตารางยังไม่พร้อม: ' + (e.message || 'ไม่ทราบสาเหตุ')); };
-  worker.postMessage({ type: 'solve', input, options: { timeLimitMs: 6000, seed: Date.now() % 100000 } });
+  worker.onerror = (e) => {
+    e.preventDefault?.();
+    console.warn('solver worker error', e.message);
+    stop();
+    // โหลด worker ไม่ได้ (เบราว์เซอร์เก่า/แอปในไลน์) → จัดในหน้าแทน ผู้ใช้ยังได้ผลเหมือนเดิม แค่หน้าค้างไม่กี่วินาที
+    if (!heard) solveInPage(input, opts, t0, skipped);
+    else failSolve('ตัวจัดตารางหยุดทำงานกลางคัน: ' + (e.message || 'ไม่ทราบสาเหตุ'));
+  };
+  worker.postMessage({ type: 'solve', input, options: opts });
+}
+
+/** สำรอง: จัดใน main thread (ช้ากว่าเล็กน้อยและหน้าค้างระหว่างจัด) ใช้เมื่อเบราว์เซอร์เปิด module worker ไม่ได้ */
+async function solveInPage(input, opts, t0, skipped) {
+  solving = null;
+  toast('เบราว์เซอร์นี้จัดเบื้องหลังไม่ได้ กำลังจัดในหน้า หน้าจออาจค้างสักครู่…', 6000);
+  try {
+    const m = await import('./solver/solver.js');
+    await new Promise((r) => setTimeout(r, 50)); // ให้ toast แสดงก่อนหน้าค้าง
+    applyResult(m.solve(input, { ...opts, timeLimitMs: 4000 }), t0, skipped);
+  } catch (e) {
+    console.error(e);
+    failSolve('เบราว์เซอร์นี้เปิดตัวจัดตารางไม่ได้ (' + (e.message || e) + ') ลองเปิดด้วย Chrome หรือ Safari รุ่นใหม่ ถ้าเปิดจากแอป LINE ให้กด “เปิดในเบราว์เซอร์”');
+  }
+}
+
+function failSolve(message) {
+  solving = null;
+  lastSolve = { termId: store.termId, error: message };
+  hideReport = false;
+  if (root) render(root);
+  toast('จัดอัตโนมัติไม่สำเร็จ ดูรายละเอียดเหนือตาราง', 6000);
+}
+
+function applyResult(result, t0, skipped) {
+  solving = null;
+  const pinnedKey = new Set(store.doc.placements.filter((p) => p.pinned).map((p) => `${p.assignmentId}|${p.day}|${p.period}`));
+  const sec = secText(performance.now() - t0);
+  store.doc.placements = (result.placements || []).map((p) => ({
+    assignmentId: p.assignmentId, day: p.day, period: p.period, pinned: pinnedKey.has(`${p.assignmentId}|${p.day}|${p.period}`),
+  }));
+  const unplaced = result.unplaced || [];
+  const miss = unplaced.reduce((s, u) => s + (u.remaining || 0), 0);
+  lastSolve = { termId: store.termId, sec, placed: store.doc.placements.length, unplaced, warnings: result.stats?.warnings || [], skipped };
+  hideReport = false;
+  store.commit('solve');
+  const n = store.doc.placements.length;
+  toast(!miss ? `จัดครบทุกคาบแล้ว ใช้เวลา ${sec} วินาที`
+    : `${n ? `จัดได้ ${n} คาบ · ` : 'ยังวางไม่ได้เลย · '}วางไม่ลง ${miss} คาบ — ดูสาเหตุและวิธีแก้เหนือตาราง`, miss ? 7000 : 3200);
 }

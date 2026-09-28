@@ -6,6 +6,10 @@ require __DIR__ . '/lib/school.php';
 
 [$user, $school] = require_school(true);
 $sid = (int) $school['id'];
+// งานดูแลระบบแบบ lazy (โฮสต์ไม่มี cron): สุ่ม ~1/200 ของคำขอ ลบโรงเรียนทดลองที่หมดอายุ
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && random_int(1, 200) === 1) {
+    try { cleanup_guests(30); } catch (Throwable $e) { error_log('cleanup_guests: ' . $e->getMessage()); }
+}
 $r = $_GET['r'] ?? '';
 $isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
 if ($isPost) csrf_check();
@@ -40,16 +44,20 @@ try {
             $err = validate_term_doc($b['data'] ?? null);
             if ($err) json_out(['error' => $err], 422);
             $name = trim((string) ($b['data']['term']['name'] ?? 'ภาคเรียน')) ?: 'ภาคเรียน';
+            $json = json_encode($b['data'], JSON_UNESCAPED_UNICODE);
+            if ($json === false || strlen($json) > TERM_MAX_BYTES) json_out(['error' => 'ข้อมูลภาคเรียนใหญ่เกินไป (เกิน ' . round(TERM_MAX_BYTES / 1e6, 1) . ' MB)'], 413);
+            $ver = (int) ($b['version'] ?? 0);
+            $at = now();
+            // คำสั่งเขียนเดียว (ธุรกรรมสั้นที่สุด) · version ใหม่ = ของเดิม + 1 รู้อยู่แล้ว ไม่ต้อง SELECT ซ้ำ
             $n = db_exec('UPDATE terms SET data_json = ?, name = ?, version = version + 1, updated_at = ?, updated_by = ?
                           WHERE id = ? AND school_id = ? AND version = ?',
-                [json_encode($b['data'], JSON_UNESCAPED_UNICODE), mb_substr($name, 0, 200), now(), $user['id'], $id, $sid, (int) ($b['version'] ?? 0)]);
+                [$json, mb_substr($name, 0, 200), $at, $user['id'], $id, $sid, $ver]);
             if ($n === 0) {
                 $cur = db_one('SELECT version FROM terms WHERE id = ? AND school_id = ?', [$id, $sid]);
                 if (!$cur) json_out(['error' => 'ไม่พบภาคเรียน'], 404);
                 json_out(['error' => 'มีการแก้ไขจากที่อื่นก่อนหน้า กรุณาโหลดข้อมูลล่าสุด', 'conflict' => true, 'version' => (int) $cur['version']], 409);
             }
-            $v = db_one('SELECT version, updated_at FROM terms WHERE id = ?', [$id]);
-            json_out(['ok' => true, 'version' => (int) $v['version'], 'updated_at' => $v['updated_at']]);
+            json_out(['ok' => true, 'version' => $ver + 1, 'updated_at' => $at]);
 
         case 'term.create':
             if (!$isPost) json_out(['error' => 'ต้องใช้ POST'], 405);
@@ -66,6 +74,8 @@ try {
                 if (!$src) json_out(['error' => 'ไม่พบภาคเรียนต้นฉบับ'], 404);
                 $data = $src['data'];
                 $data['term']['name'] = $name ?: ($src['name'] . ' (สำเนา)');
+                // clear = สำเนาครู/วิชา/การสอน/คาบล็อก แต่ล้างตาราง (ภาคเรียนใหม่ที่จะจัดใหม่ทั้งหมด)
+                if (!empty($b['clear'])) $data['placements'] = [];
                 db_exec('INSERT INTO terms (school_id, name, data_json, version, updated_at, updated_by) VALUES (?,?,?,?,?,?)',
                     [$sid, $data['term']['name'], json_encode($data, JSON_UNESCAPED_UNICODE), 1, now(), $user['id']]);
                 $id = (int) db()->lastInsertId();

@@ -82,3 +82,23 @@ function validate_term_doc($d): ?string {
     }
     return null;
 }
+
+/**
+ * ลบโรงเรียนทดลองที่อายุเกิน 48 ชม. (ผู้ใช้ + โรงเรียน + ภาคเรียน) ทีละไม่เกิน $limit รายการ ในธุรกรรมเดียว
+ * โฮสต์ไม่มี cron → เรียกตอนสร้างโรงเรียนทดลองใหม่ (auth/guest.php) และสุ่มจาก api.php
+ */
+function cleanup_guests(int $limit = 100): int {
+    $cutoff = date('Y-m-d H:i:s', time() - 48 * 3600);
+    $old = db_all("SELECT id, school_id FROM users WHERE provider = 'guest' AND created_at < ? LIMIT " . max(1, min(500, $limit)), [$cutoff]);
+    if (!$old) return 0;
+    db_tx(function () use ($old) {
+        foreach ($old as $g) {
+            if ($g['school_id']) {
+                db_exec('DELETE FROM terms WHERE school_id = ?', [$g['school_id']]);
+                db_exec('DELETE FROM schools WHERE id = ?', [$g['school_id']]);
+            }
+            db_exec('DELETE FROM users WHERE id = ?', [$g['id']]);
+        }
+    });
+    return count($old);
+}

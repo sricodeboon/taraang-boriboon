@@ -11,11 +11,15 @@
 // ยกเลิกกลางคัน: w.terminate()
 // ส่วนเสริม: { type: 'validate', input, placements } → { type: 'validated', conflicts }
 
-import { solve, validate } from './solver.js';
+// solver.js โหลดแบบมีเลขเวอร์ชัน (?sv= จาก board.js) — worker ไม่ผ่าน import map ของหน้า ถ้า import ตรง ๆ
+// เบราว์เซอร์จะใช้ solver.js เก่าจากแคชหลังอัปเดตเว็บ · รับเฉพาะตัวเลข กันการชี้ไปไฟล์อื่น
+const sv = (() => { try { return new URL(self.location.href).searchParams.get('sv'); } catch { return null; } })();
+const ready = import('./solver.js' + (sv && /^\d+$/.test(sv) ? '?v=' + sv : ''));
 
-self.onmessage = (e) => {
+self.onmessage = async (e) => {
   const msg = e.data || {};
   try {
+    const { solve, validate } = await ready;
     if (msg.type === 'solve') {
       const options = Object.assign({}, msg.options || {}, {
         onProgress: (p) => self.postMessage({ type: 'progress', pct: p.pct, best: p.best, phase: p.phase, iterations: p.iterations, ms: p.ms }),

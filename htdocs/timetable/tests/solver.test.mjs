@@ -372,7 +372,8 @@ await test('solver.worker.js: ส่ง progress และ done ตามสั�
   const msgs = [];
   globalThis.self = { postMessage: (m) => msgs.push(m) };
   await import('../assets/solver/solver.worker.js');
-  self.onmessage({ data: { type: 'solve', input: sample, options: { timeLimitMs: 4000, seed: 1 } } });
+  // onmessage เป็น async แล้ว (รอ import solver.js แบบมีเวอร์ชัน)
+  await self.onmessage({ data: { type: 'solve', input: sample, options: { timeLimitMs: 4000, seed: 1 } } });
   const done = msgs.find((m) => m.type === 'done');
   assert.ok(done && done.result && Array.isArray(done.result.placements));
   assert.equal(done.result.unplaced.length, 0);
@@ -380,11 +381,81 @@ await test('solver.worker.js: ส่ง progress และ done ตามสั�
   assert.ok(prog.length >= 2, 'ต้องมี progress');
   for (const p of prog) assert.ok(p.pct >= 0 && p.pct <= 1 && p.best && typeof p.best === 'object');
   assert.equal(prog[prog.length - 1].pct, 1);
-  self.onmessage({ data: { type: 'validate', input: tiny, placements: [{ assignmentId: 'a4', day: 0, period: 2 }] } });
+  await self.onmessage({ data: { type: 'validate', input: tiny, placements: [{ assignmentId: 'a4', day: 0, period: 2 }] } });
   assert.equal(msgs.at(-1).type, 'validated');
   assert.equal(msgs.at(-1).conflicts[0].type, 'break');
   delete globalThis.self;
   return `progress ${prog.length} ครั้ง`;
+});
+
+// ── กรณีผู้ใช้จริงคนแรก (28 ก.ย. 69): ประถมเล็ก ป.1–ป.6 ครู 9 ไม่มีห้องพิเศษ 78 วิชา 75 งานสอน ล็อก 3 ──
+// ตารางว่าง 5 วัน 8 คาบ (แม่แบบ blank) + ข้อมูลกรอกเองจากตัวอย่างประถม — ต้องจัดได้ครบ และกรณีข้อมูลผิดต้องวางเท่าที่ได้พร้อมเหตุผล
+const primary = JSON.parse(readFileSync(join(here, '../assets/solver/sample-primary.json'), 'utf8'));
+function firstUserCase() {
+  const d = clone(primary);
+  const times = [0, 1, 2, 3, 'b', 4, 5, 6, 7];
+  d.term = { name: 'ภาคเรียนที่ 2/2569', days: 5, periods: times.map((x) => (x === 'b' ? { label: 'พักกลางวัน', type: 'break' } : { label: String(x + 1), type: 'class' })) };
+  d.rooms = [];
+  for (const a of d.assignments) a.roomId = null;
+  for (let i = 0; i < 6; i++) d.subjects.push({ id: 'sx' + i, code: '', name: 'วิชาใหม่', color: '#7FB0E8' });
+  for (let i = 0; i < 3; i++) d.assignments.push({ id: 'ax' + i, subjectId: 'sx' + i, classId: d.classes[i].id, teacherId: d.teachers[i].id, roomId: null, perWeek: 1, doubles: 0 });
+  d.locks = [[2, 7], [3, 8], [4, 8]].map(([day, period]) => ({ classId: null, day, period, label: 'กิจกรรม' }));
+  d.placements = [];
+  return d;
+}
+const perWeekTotal = (d) => d.assignments.reduce((s, a) => s + a.perWeek, 0);
+
+await test('ผู้ใช้จริง: ประถม 6 ห้อง ครู 9 ห้องพิเศษ 0 วิชา 78 งานสอน 75 ล็อก 3 → จัดครบไม่ชน', () => {
+  const d = firstUserCase();
+  assert.equal(d.rooms.length, 0); assert.equal(d.subjects.length, 78); assert.equal(d.assignments.length, 75); assert.equal(d.locks.length, 3);
+  const r = solve(toSolverInput(d), { timeLimitMs: 4000, seed: 3 });
+  assert.equal(r.stats.unplacedPeriods, 0, JSON.stringify(r.unplaced.slice(0, 3)));
+  assert.equal(r.placements.length, perWeekTotal(d));
+  assert.equal(validate(toSolverInput(d), r.placements).length, 0);
+  independentChecks(d, r);
+  return `${r.placements.length} คาบ ${r.stats.ms} ms`;
+});
+
+await test('ผู้ใช้จริง: ไม่ได้เปลี่ยนช่องครู (ทุกงานสอนเป็นครูคนแรก) → วางเท่าที่ได้ + บอกเหตุผลภาระครู', () => {
+  const d = firstUserCase();
+  for (const a of d.assignments) a.teacherId = d.teachers[0].id;
+  const r = solve(toSolverInput(d), { timeLimitMs: 3000, seed: 3 });
+  assert.ok(r.placements.length > 0, 'ต้องวางได้บางส่วน ไม่ใช่ 0');
+  assert.equal(validate(toSolverInput(d), r.placements).length, 0);
+  assert.equal(r.placements.length + r.stats.unplacedPeriods, perWeekTotal(d));
+  assert.ok(r.unplaced.every((u) => /ต้องสอน \d+ คาบ\/สัปดาห์ แต่สอนได้สูงสุด/.test(u.reason)), r.unplaced[0]?.reason);
+  return `วาง ${r.placements.length} · ค้าง ${r.stats.unplacedPeriods} · "${r.unplaced[0].reason}"`;
+});
+
+await test('ผู้ใช้จริง: ชั่วโมงรวมของห้องเกินคาบในสัปดาห์ → เหตุผลระบุห้องและจำนวนคาบ', () => {
+  const d = firstUserCase();
+  for (const a of d.assignments.filter((x) => x.classId === d.classes[0].id)) a.perWeek += 2;
+  const r = solve(toSolverInput(d), { timeLimitMs: 3000, seed: 3 });
+  assert.ok(r.placements.length > 0);
+  assert.equal(validate(toSolverInput(d), r.placements).length, 0);
+  assert.ok(r.unplaced.some((u) => new RegExp(`${d.classes[0].name} ต้องเรียนรวม \\d+ คาบ/สัปดาห์ แต่มีคาบว่างเพียง 37 คาบ`).test(u.reason)), r.unplaced.map((u) => u.reason).join(' | '));
+  return r.unplaced[0].reason;
+});
+
+await test('ผู้ใช้จริง: ครูไม่ว่างทุกช่อง (กดช่องแดงผิดความหมาย) → 0 คาบ คืนผลเร็ว พร้อมเหตุผล', () => {
+  const d = firstUserCase();
+  for (const t of d.teachers) t.unavailable = [...Array(5).keys()].flatMap((x) => [...Array(9).keys()].map((y) => [x, y]));
+  const r = solve(toSolverInput(d), { timeLimitMs: 3000, seed: 3 });
+  assert.equal(r.placements.length, 0);
+  assert.equal(r.stats.unplacedPeriods, perWeekTotal(d));
+  assert.ok(r.stats.ms < 500, `ช้าไป ${r.stats.ms} ms`);
+  assert.ok(r.unplaced.every((u) => u.reason.includes('ไม่มีคาบที่ครูว่าง')));
+});
+
+await test('ผู้ใช้จริง: งานสอนที่ยังไม่มีครู/อ้างครูที่ถูกลบ → ไม่ล้ม ยังจัดส่วนอื่นได้', () => {
+  const d = firstUserCase();
+  d.assignments[0].teacherId = null;
+  d.assignments[1].teacherId = 't-ถูกลบ';
+  d.assignments[2].classId = 'c-ถูกลบ';
+  const r = solve(toSolverInput(d), { timeLimitMs: 3000, seed: 3 });
+  assert.ok(r.placements.length >= perWeekTotal(d) - d.assignments[2].perWeek - 2);
+  assert.ok(r.unplaced.some((u) => u.assignmentId === d.assignments[2].id && /ไม่พบห้องเรียน/.test(u.reason)));
+  assert.ok(r.stats.warnings.some((w) => w.includes('ครูที่ไม่พบ')));
 });
 
 // ── สรุปข้อมูลตัวอย่าง ────────────────────────────────────────────────────

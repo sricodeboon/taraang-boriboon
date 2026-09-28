@@ -20,11 +20,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $s = $v;
     $error = validate_school($s);
     if (!$error) {
-        db_exec('INSERT INTO schools (name, school_code, tambon, amphoe, province, created_at) VALUES (?,?,?,?,?,?)',
-            [$s['name'], $s['code'], $s['tambon'], $s['amphoe'], $s['province'], now()]);
-        $sid = (int) db()->lastInsertId();
-        db_exec('UPDATE users SET school_id = ?, role = ? WHERE id = ?', [$sid, 'owner', $u['id']]);
-        create_term($sid, (int) $u['id'], $v['template'], 'ภาคเรียนที่ 1/' . ((int) date('Y') + 543), $v['template'] === 'blank' ? $v['band'] : null);
+        db_tx(function () use ($s, $u, $v) {
+            db_exec('INSERT INTO schools (name, school_code, tambon, amphoe, province, created_at) VALUES (?,?,?,?,?,?)',
+                [$s['name'], $s['code'], $s['tambon'], $s['amphoe'], $s['province'], now()]);
+            $sid = (int) db()->lastInsertId();
+            db_exec('UPDATE users SET school_id = ?, role = ? WHERE id = ?', [$sid, 'owner', $u['id']]);
+            create_term($sid, (int) $u['id'], $v['template'], 'ภาคเรียนที่ 1/' . ((int) date('Y') + 543), $v['template'] === 'blank' ? $v['band'] : null);
+        });
         redirect('app.php');
     }
 }

@@ -1,0 +1,116 @@
+/* หน้าผู้ดูแลระบบ — ใช้ตัวแปรสีจาก app.css · ห้ามสีเขียว: สถานะดีใช้น้ำเงินโขง/ทองนาค/ชมพูบัว */
+.adm-bar { display:flex; align-items:center; gap:10px 14px; flex-wrap:wrap; padding:10px 16px; background:#0F2438; color:#F2F4F1; position:sticky; top:0; z-index:20; }
+.adm-bar .brand { color:#F2F4F1; }
+.adm-bar .brand .c { color:#8DB8EA; }
+.adm-bar .brand .b { color:#E3B85A; }
+.adm-tag { font-family:var(--mono); font-size:.78rem; letter-spacing:.08em; padding:2px 8px; border:1px solid #C8962E; color:#E3B85A; border-radius:4px; }
+.adm-nav { margin-left:auto; display:flex; align-items:center; gap:10px; min-width:0; }
+.adm-me { color:#B9C6CF; font-size:.88rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:18ch; }
+.adm-bar .btn { border-radius:6px; background:transparent; color:#F2F4F1; border-color:#3A5268; }
+.adm-bar .btn:hover { border-color:#E3B85A; }
+
+.adm { padding-top:20px; padding-bottom:40px; max-width:1440px; }
+.adm h1, .adm h2 { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; }
+.adm-h1 { font-size:1.5rem; }
+.adm h2 { font-size:1.2rem; }
+.adm h1 small, .adm h2 small { font-family:var(--body); font-size:.82rem; font-weight:400; }
+.adm-sec { margin-top:30px; }
+.sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+
+/* ตัวเลขสรุป */
+.tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-top:12px; }
+.tile { background:var(--surface); border:1px solid var(--line); border-top:3px solid var(--ink); border-radius:8px; padding:10px 12px; display:grid; gap:2px; min-width:0; }
+.tile b { font-family:var(--mono); font-size:1.6rem; line-height:1.15; }
+.tile b small { font-size:1rem; color:var(--muted); }
+.tile span { font-size:.86rem; }
+.tile i { font-style:normal; font-size:.76rem; color:var(--muted); }
+.tile.t-blue { border-top-color:var(--blue); }
+.tile.t-gold { border-top-color:#C8962E; }
+
+/* สีระดับความสำคัญ: 1 ชมพูบัวเข้ม · 2 ทองนาค · 3 น้ำเงินโขง · 4 ฟ้าค่ำ · 5 เทา */
+.p1 { --pc:#B04A6E; --pb:#FBE6EE; }
+.p2 { --pc:#9A6E14; --pb:#FBF1DC; }
+.p3 { --pc:#1F5FA8; --pb:#E4EEF9; }
+.p4 { --pc:#0F2438; --pb:#E9EDF2; }
+.p5 { --pc:#6B777C; --pb:#EFF1EF; }
+@media (prefers-color-scheme: dark) {
+  .p1 { --pc:#F0A6BD; --pb:#3A1C28; }
+  .p2 { --pc:#E3B85A; --pb:#2A2616; }
+  .p3 { --pc:#8DB8EA; --pb:#15263A; }
+  .p4 { --pc:#D5DEE6; --pb:#1B2A38; }
+  .p5 { --pc:#98A8AD; --pb:#18232C; }
+  .adm-bar { background:#07111A; border-bottom:1px solid var(--line); }
+}
+.dot { width:8px; height:8px; border-radius:50%; background:var(--pc, var(--muted)); flex:none; }
+
+.chips { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
+.chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border:1px solid var(--line); border-radius:6px; background:var(--surface);
+        text-decoration:none; color:var(--ink); font-size:.86rem; }
+.chip b { font-family:var(--mono); color:var(--pc, var(--ink)); }
+.chip:hover { border-color:var(--pc, var(--blue)); }
+.chip.on { border-color:var(--pc, var(--ink)); background:var(--pb, var(--surface-2)); box-shadow:inset 0 -2px 0 var(--pc, var(--ink)); }
+
+.tools { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-bottom:10px; }
+.search { flex:1 1 240px; min-width:0; }
+.switch { display:inline-flex; align-items:center; gap:6px; font-size:.88rem; cursor:pointer; }
+.switch input { accent-color:#1F5FA8; width:16px; height:16px; }
+.count { font-size:.84rem; }
+.empty { padding:24px; text-align:center; color:var(--muted); border:1px dashed var(--line); border-radius:8px; }
+
+/* ตาราง: เลื่อนแนวนอนในกรอบ ไม่ดันหน้ากว้าง */
+.frame { border:1px solid var(--line); border-radius:8px; background:var(--surface); max-height:80vh; overflow:auto; }
+.adm-table { font-size:.88rem; min-width:1240px; }
+.adm-table td:nth-child(1) { min-width:150px; }
+.adm-table td:nth-child(2) { min-width:220px; }
+.adm-table td:nth-child(3) { min-width:180px; }
+.adm-table th { padding:0; z-index:1; }
+.adm-table th button { all:unset; box-sizing:border-box; display:block; width:100%; padding:8px 10px; cursor:pointer; white-space:nowrap; }
+.adm-table th button:focus-visible { outline:2px solid var(--blue); outline-offset:-2px; }
+.adm-table th button::after { content:" ↕"; opacity:.35; font-size:.8em; }
+.adm-table th[aria-sort="ascending"] button::after { content:" ↑"; opacity:1; }
+.adm-table th[aria-sort="descending"] button::after { content:" ↓"; opacity:1; }
+.adm-table td { vertical-align:top; padding:8px 10px; }
+.adm-table tbody tr { box-shadow:inset 3px 0 0 var(--pc); }
+.adm-table tbody tr:hover { background:var(--surface-2); }
+.adm-table tr.is-adm, .adm-table tr.is-guest { opacity:.72; }
+.adm-table .num { text-align:right; }
+.prio { display:inline-flex; align-items:center; gap:6px; padding:1px 8px; border-radius:4px; background:var(--pb); color:var(--pc); font-weight:600; white-space:nowrap; font-size:.82rem; }
+.note { display:block; color:var(--muted); font-size:.76rem; margin-top:3px; }
+.who { display:block; }
+.prov { font-family:var(--mono); font-size:.7rem; padding:0 5px; border-radius:3px; border:1px solid var(--line); color:var(--muted); }
+.prov-google { color:var(--blue); border-color:var(--blue); }
+.prov-line { color:var(--ink); }
+.badge { font-size:.7rem; padding:0 6px; border-radius:3px; background:#C8962E; color:#0F2438; font-weight:600; }
+.mail { display:block; font-size:.8rem; word-break:break-all; }
+.dt { white-space:nowrap; }
+.dt small { display:block; font-size:.74rem; }
+.area { min-width:180px; }
+.size { white-space:nowrap; }
+.size small { display:block; font-family:var(--body); font-size:.74rem; }
+.prog-cell { min-width:130px; }
+.prog { display:block; height:6px; border-radius:3px; background:var(--brk); overflow:hidden; margin:6px 0 3px; }
+.prog > span { display:block; height:100%; background:#C8962E; }
+.prog.full > span { background:#1F5FA8; }
+.prog-cell .mono { font-size:.8rem; white-space:nowrap; }
+
+.pager { display:flex; align-items:center; justify-content:center; gap:12px; margin:12px 0 0; font-size:.86rem; }
+
+/* จังหวัด/อำเภอ */
+.geo { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:4px 16px; margin-top:12px; }
+.geo-row { border-bottom:1px solid var(--line); }
+.geo-row summary { display:grid; grid-template-columns:minmax(0, 9em) 1fr auto; align-items:center; gap:10px; padding:6px 2px; cursor:pointer; list-style:none; }
+.geo-row summary::-webkit-details-marker { display:none; }
+.geo-row[open] summary .g-name { color:var(--blue); }
+.g-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.g-bar { height:8px; background:var(--brk); border-radius:4px; overflow:hidden; }
+.g-bar > span { display:block; height:100%; background:#1F5FA8; }
+.geo-row ul { list-style:none; margin:0 0 8px; padding:0 0 0 12px; font-size:.86rem; }
+.geo-row li { display:flex; justify-content:space-between; padding:2px 0; border-top:1px dashed var(--line); }
+.foot { margin-top:30px; font-size:.8rem; }
+
+@media (max-width:600px) {
+  .adm-me { display:none; }
+  .tile b { font-size:1.35rem; }
+  .geo { grid-template-columns:minmax(0, 1fr); }
+  .frame { max-height:none; }
+}
