@@ -36,6 +36,8 @@ page_head('ตารางบริบูรณ์ · จัดตาราง�
   .or::before, .or::after { content:""; flex:1; border-top:1px solid var(--line); }
   .top { display:flex; justify-content:space-between; align-items:center; padding-block:18px; gap:10px; flex-wrap:wrap; }
   .soon { font-size:.78rem; color:var(--muted); font-weight:400; }
+  .sister { display:flex; gap:10px; align-items:center; margin:22px 0 0; padding:10px 14px; border:1px solid var(--line); border-radius:6px; background:var(--surface); font-size:.92rem; max-width:34rem; }
+  .sister img { flex:none; }
   .foot { padding-block:24px 40px; color:var(--muted); font-size:.86rem; border-top:1px solid var(--line); }
   @media (max-width:820px) { .hero { grid-template-columns:1fr; padding-top:16px; } }
 </style>');
@@ -46,6 +48,7 @@ page_head('ตารางบริบูรณ์ · จัดตาราง�
     <nav style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
       <a class="btn btn-sm" href="<?= GITHUB_URL ?>" target="_blank" rel="noopener" title="ซอร์สโค้ดบน GitHub">ดาวน์โหลดโปรแกรม</a>
       <a class="btn btn-sm" href="guide.php">คู่มือการใช้งาน</a>
+      <a class="btn btn-sm" href="../khlang/" title="ระบบทะเบียนครุภัณฑ์ ใช้บัญชีเดียวกัน">คลังบริบูรณ์ · ครุภัณฑ์</a>
     </nav>
   </header>
 
@@ -61,6 +64,7 @@ page_head('ตารางบริบูรณ์ · จัดตาราง�
         <li><span class="k">›</span><span><b>คาบล็อก</b> กิจกรรมหน้าเสาธง ลูกเสือ ชุมนุม ล็อกไว้ไม่ให้จัดทับ</span></li>
         <li><span class="k">›</span><span><b>ส่งออก Excel · PDF</b> ตารางรายห้องและรายครู พร้อมพิมพ์ติดบอร์ด</span></li>
       </ul>
+      <p class="sister"><img src="../khlang/assets/brand/mark-color.svg" alt="" width="36" height="36"><span>บัญชีเดียวกันใช้ <a href="../khlang/"><b>คลังบริบูรณ์</b></a> ได้ด้วย · ทะเบียนครุภัณฑ์โรงเรียน ออกเลขอัตโนมัติ สติกเกอร์ QR ยืม–คืน ตรวจนับประจำปี</span></p>
     </div>
 
     <div class="card login">
@@ -87,7 +91,7 @@ page_head('ตารางบริบูรณ์ · จัดตาราง�
   </section>
 
   <footer class="foot">
-    ตารางบริบูรณ์ · โดย <a href="../">ศรีโค้ดบูรณ์</a> ครูแจ็ก นาทม นครพนม · <a href="guide.php">คู่มือ</a> · <a href="terms.php">ข้อกำหนดการใช้งาน</a> · <a href="privacy.php">นโยบายความเป็นส่วนตัว</a>
+    ตารางบริบูรณ์ · โดย <a href="../">ศรีโค้ดบูรณ์</a> ครูแจ็ก นาทม นครพนม · <a href="guide.php">คู่มือ</a> · <a href="../khlang/">คลังบริบูรณ์ (ครุภัณฑ์)</a> · <a href="terms.php">ข้อกำหนดการใช้งาน</a> · <a href="privacy.php">นโยบายความเป็นส่วนตัว</a>
     · ดาวน์โหลดโปรแกรม: <a href="<?= GITHUB_URL ?>" target="_blank" rel="noopener">GitHub</a> (<a href="<?= GITHUB_URL ?>/archive/refs/heads/main.zip">.zip</a>)
   </footer>
 </main>

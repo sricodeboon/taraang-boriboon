@@ -169,6 +169,11 @@ $assetVersion = (string) @filemtime(__DIR__ . '/assets/mind.js');
             <b>DPA พร้อมส่ง</b>
             <span>ย่อวิดีโอการสอนหลาย GB ให้เหลือ 500 MB แปลง MOV จาก iPhone เป็น MP4 ตัดให้ไม่เกิน 60 นาที รวม PDF ทำในเครื่องครูเอง ฟรี ไม่ต้องลงโปรแกรม</span>
           </a></li>
+          <li><a class="work-card" href="khlang/">
+            <span class="work-top"><img src="khlang/assets/brand/app-icon-192.png" alt="" width="44" height="44"><i>/khlang</i></span>
+            <b>คลังบริบูรณ์</b>
+            <span>ระบบทะเบียนครุภัณฑ์โรงเรียน ออกเลขอัตโนมัติ ถ่ายรูป พิมพ์สติกเกอร์ QR สแกนตรวจนับประจำปี ยืม–คืน ทะเบียนคุมพร้อมค่าเสื่อมราคา ใช้บัญชีเดียวกับตารางบริบูรณ์</span>
+          </a></li>
         </ul>
       </div>
       <div class="promise">
