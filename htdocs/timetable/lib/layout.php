@@ -37,6 +37,7 @@ function page_head(string $title, string $extraHead = '', string $desc = DEFAULT
 <link rel="preload" href="/assets/fonts/ChakraPetch-700-thai.woff2" as="font" type="font/woff2" crossorigin>
 <style><?php readfile(dirname(APP_ROOT) . '/assets/fonts/fonts.css'); ?></style>
 <style><?php readfile(APP_ROOT . '/assets/app.css'); /* ฝังในหน้า ไม่ให้ CSS บล็อกการแสดงผล */ ?></style>
+<style><?php readfile(APP_ROOT . '/assets/motion.css'); ?></style>
 <?= $extraHead ?>
 </head>
 <body>

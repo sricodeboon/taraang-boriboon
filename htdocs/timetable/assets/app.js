@@ -5,6 +5,7 @@ import * as board from './board.js';
 import * as data from './data.js';
 import * as periods from './periods.js';
 import * as exporter from './export.js';
+import * as motion from './motion.js';
 
 const TABS = { board, data, periods, export: exporter };
 store.curriculum = window.TT.cur || null; // รหัสวิชา → คาบ/สัปดาห์ตามหลักสูตร (เติมให้ข้อมูลเก่าตอน sanitize)
@@ -40,12 +41,38 @@ export async function refreshCsrf() {
   window.TT.csrf = me.csrf;
 }
 
-function renderTab() {
+function renderTab({ fresh = false } = {}) {
   document.querySelectorAll('.tabs [data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
   for (const k of Object.keys(TABS)) $('#tab-' + k).hidden = k !== tab;
   // finally: แท็บพังกับข้อมูลเก่าที่ไม่คาดไว้ → ยังแสดง <main> (.tt-ready) ให้สลับแท็บ/ส่งออกไฟล์สำรองได้ ไม่ใช่จอว่าง
   // .tt-ready ใส่ในงาน JS เดียวกับที่วาดแถบขั้นตอน (ยังไม่ paint ระหว่างกัน) จึงไม่เกิด CLS
   try { if (store.doc) TABS[tab].render($('#tab-' + tab)); } finally { if (store.doc) $('#app').classList.add('tt-ready'); renderSteps(); }
+  moveInk();
+  // แผงที่เพิ่งสลับมา: จาง+เลื่อนขึ้นเบา ๆ (เฉพาะตอนผู้ใช้สลับแท็บ ไม่เล่นตอนข้อมูลเปลี่ยน) · ลดภาพเคลื่อนไหว = แสดงทันที
+  if (fresh) motion.once($('#tab-' + tab), 'tab-in');
+}
+
+// ---------- เส้นใต้แท็บตัวเดียวเลื่อนตามแท็บที่เลือก (DELIGHT §3.3) · สไตล์ .tabs-ink อยู่ board.css ----------
+// scaleX(ความกว้างแท็บ/ความกว้างฐานของ .tabs-ink) · วัดใหม่เมื่อ .tabs เปลี่ยนขนาด และเมื่อฟอนต์โหลดเสร็จ (ความกว้างตัวอักษรเปลี่ยน)
+let ink = null;
+function moveInk() {
+  const nav = $('.tabs');
+  if (!nav) return;
+  if (!ink) {
+    ink = Object.assign(document.createElement('i'), { className: 'tabs-ink' });
+    ink.setAttribute('aria-hidden', 'true');
+    nav.appendChild(ink);
+    if (typeof ResizeObserver === 'function') new ResizeObserver(() => moveInk()).observe(nav);
+    document.fonts?.ready?.then(() => moveInk());
+  }
+  const b = nav.querySelector('[data-tab][aria-selected="true"]');
+  if (!b) return;
+  const n = nav.getBoundingClientRect(), r = b.getBoundingClientRect();
+  if (!r.width) return; // ยังซ่อนอยู่ (ก่อนแสดงผล) — ResizeObserver เรียกซ้ำเอง
+  const x = r.left - n.left + nav.scrollLeft;
+  // ความกว้างฐานอ่านจาก CSS จริง (board.css ตั้ง 1px · แบบเดิมในแผนคือ 100px) — ไม่ผูกกับตัวเลขฝั่งใดฝั่งหนึ่ง
+  const base = ink.offsetWidth || 100;
+  ink.style.transform = `translateX(${x.toFixed(1)}px) scaleX(${(r.width / base).toFixed(4)})`;
 }
 
 // ---------- แถบขั้นตอน 1-2-3-4 (ครู → ใครสอนอะไร → ตรวจ → จัด) ----------
@@ -56,7 +83,8 @@ const blankDoc = (d) => !!d && !d.classes.length && !d.teachers.length && !d.ass
 async function openWizard(auto) {
   try { const w = await wizard(); auto ? w.maybeOpen() : w.open(); } catch (e) { if (!auto) notify.error('เปิดตัวช่วยไม่สำเร็จ: ' + e.message); }
 }
-const STEP_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>';
+// เช็กแบบเส้น (stroke) — ขั้นที่เพิ่งเสร็จวาดเส้นจาก 0 → เต็ม (stroke-dashoffset 24 → 0)
+const STEP_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" pathLength="24" stroke-dasharray="24"/></svg>';
 function stepState(d) {
   const asg = d.assignments;
   const noTeacher = asg.filter(noTch).length;
@@ -89,17 +117,42 @@ function renderSteps() {
   $('#app').classList.add('tt-ready'); // แสดง <main> พร้อมแถบขั้นตอน/ครูบูรณ์ในเฟรมเดียวกัน (board.css) ไม่ให้เนื้อหาถูกดันลง (CLS)
   const steps = stepState(d);
   const cur = steps.find((s) => !s.done)?.n || 0;
-  nav.innerHTML = `<ol>${steps.map((s) => `<li><button type="button" class="${s.done ? 'done' : s.n === cur ? 'cur' : ''}" data-step="${esc(JSON.stringify(s.go))}" title="${esc(s.tip)}" ${s.n === cur ? 'aria-current="step"' : ''}>
+  const html = `<ol>${steps.map((s, i) => `<li${i && steps[i - 1].done ? ' class="ln-on"' : ''}><button type="button" class="${s.done ? 'done' : s.n === cur ? 'cur' : ''}" data-step="${esc(JSON.stringify(s.go))}" title="${esc(s.tip)}" ${s.n === cur ? 'aria-current="step"' : ''}>
       <span class="n">${s.done ? STEP_ICON : s.n}</span>${s.t}${s.badge ? ` <span class="b" aria-label="${esc(s.tip)}">${s.badge}</span>` : ''}</button></li>`).join('')}</ol>
     ${blankDoc(d) ? '<button type="button" class="btn btn-sm btn-primary" data-open-wizard>เริ่มด้วยตัวช่วย 4 คำถาม</button>' : ''}`;
+  // วาดใหม่เฉพาะเมื่อเนื้อหาเปลี่ยน (แก้ข้อมูลทุกช่องเรียกมาที่นี่) แอนิเมชันที่กำลังเล่นจึงไม่ถูกตัด
+  const termKey = store.termId;
+  if (html === stepsHTML && termKey === stepsTerm) return;
+  nav.innerHTML = html;
+  const done = new Set(steps.filter((s) => s.done).map((s) => s.n));
+  // ครั้งแรกของภาคเรียน (เปิดหน้า/สลับภาคเรียน) ไม่เล่น — เล่นเฉพาะตอนสถานะเปลี่ยนจริงระหว่างใช้งาน
+  if (prevDone && termKey === stepsTerm) {
+    const lis = nav.querySelectorAll('ol > li');
+    steps.forEach((s, i) => {
+      const li = lis[i], b = li?.querySelector('button');
+      if (!b) return;
+      if (s.done && !prevDone.has(s.n)) b.classList.add('just-done');
+      if (i && steps[i - 1].done && !prevDone.has(steps[i - 1].n)) li.classList.add('ln-new');
+      if (s.n === cur && cur !== prevCur) b.classList.add('cur-new');
+    });
+  }
+  prevDone = done; prevCur = cur; stepsHTML = html; stepsTerm = termKey;
 }
+let prevDone = null, prevCur = 0, stepsHTML = '', stepsTerm = null;
 // สไตล์แถบขั้นตอน (ใส่ครั้งเดียว · ใช้ตัวแปรสีของ app.css: เสร็จ = น้ำเงิน, ขั้นปัจจุบัน = ทอง · ไม่มีแถบสีขอบซ้าย)
 function stepsCss() {
   const s = document.createElement('style');
   s.textContent = `.tt-steps{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 16px;background:var(--surface-2);border-bottom:1px solid var(--line)}
 .tt-steps[hidden]{display:none}
 .tt-steps ol{display:flex;gap:4px;margin:0;padding:0;list-style:none;flex-wrap:wrap}
-.tt-steps li{display:flex;align-items:center}.tt-steps li+li::before{content:"";width:14px;height:1px;background:var(--line);margin-right:4px}
+.tt-steps li{display:flex;align-items:center}.tt-steps li+li::before{content:"";width:14px;height:1px;background:var(--line);margin-right:4px;transform-origin:left center}
+.tt-steps li.ln-on::before{background:var(--blue)}
+.tt-steps li.ln-new::before{animation:tt-grow var(--d-4,520ms) var(--e-out,ease-out) both}
+.tt-steps .just-done .n{animation:m-pop var(--d-3,320ms) var(--spring-pop,ease-out) both}
+.tt-steps .just-done .n path{animation:tt-draw calc(360ms * var(--m,1)) var(--e-out,ease-out) both}
+.tt-steps .cur-new{animation:m-in var(--d-3,320ms) var(--e-out,ease-out) both,m-pulse calc(1.4s * var(--m,1)) var(--e-out,ease-out) 1}
+@keyframes tt-grow{from{transform:scaleX(0)}}
+@keyframes tt-draw{from{stroke-dashoffset:24}}
 .tt-steps ol button{display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;background:none;border-radius:999px;padding:3px 10px 3px 4px;cursor:pointer;color:var(--muted);font:inherit;font-size:.88rem;min-height:32px}
 .tt-steps ol button:hover{border-color:var(--line);background:var(--surface)}
 .tt-steps .n{width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;border:1px solid var(--line);background:var(--surface);font-size:.78rem;font-weight:600}
@@ -250,7 +303,7 @@ function markClean(termId) {
 // ---------- ชนกัน (409): รวมการแก้ไขอัตโนมัติรายหมวด ----------
 // เดิมถามแค่ "โหลดใหม่ (ของเราหาย) / บันทึกทับ (ของอีกที่หาย)" → เปิดสองแท็บแล้วกด Cancel ทำตารางที่จัดไว้หายทั้งหมดได้
 // ตอนนี้เทียบ 3 ทาง (ฐาน = ฉบับที่บันทึกล่าสุดของหน้านี้, ของเรา, ของเซิร์ฟเวอร์) รายหมวด: แก้ฝั่งเดียว = เอาฝั่งนั้น, แก้ทั้งสองฝั่ง = ถาม
-const PART_NAMES = { term: 'ชื่อภาคเรียน/โครงคาบ', classes: 'ห้องเรียน', teachers: 'ครู', rooms: 'ห้องพิเศษ', subjects: 'วิชา', assignments: 'การสอน', locks: 'คาบล็อก', placements: 'ตารางที่จัดไว้', settings: 'ค่าตั้งของภาคเรียน', meta: 'ผลจัดล่าสุด' };
+const PART_NAMES = { term: 'ชื่อภาคเรียน/โครงคาบ', classes: 'ห้องเรียน', teachers: 'ครู', rooms: 'ห้องพิเศษ', subjects: 'วิชา', assignments: 'การสอน', locks: 'คาบล็อก', placements: 'คาบที่วางทับกัน', settings: 'ค่าตั้งของภาคเรียน', meta: 'ผลจัดล่าสุด' };
 /** รวมแล้วถามเฉพาะเมื่อชนจริง คืนเอกสารที่รวมแล้ว */
 async function mergeAsk(base, mine, theirs, intro) {
   let { merged, clashes } = merge3(base, mine, theirs);
@@ -404,7 +457,12 @@ async function flush() { clearTimeout(saveTimer); if (savePromise || isDirty()) 
 periods.setActions({ newTerm, copyTerm, deleteTerm });
 
 // ---------- เริ่ม ----------
-document.querySelectorAll('.tabs [data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; sessionSet('tab', tab); renderTab(); }));
+// สลับแท็บผ่าน View Transitions (ถ้าเบราว์เซอร์รองรับ และไม่ได้ลดภาพเคลื่อนไหว) · ไม่รองรับ = สลับทันทีเหมือนเดิม
+document.querySelectorAll('.tabs [data-tab]').forEach((b) => b.addEventListener('click', () => {
+  if (b.dataset.tab === tab) { renderTab(); return; } // กดแท็บเดิม = วาดใหม่เฉย ๆ (เหมือนเดิม)
+  tab = b.dataset.tab; sessionSet('tab', tab);
+  motion.viewTransition(() => renderTab({ fresh: true }));
+}));
 $('#term-select').addEventListener('change', async (e) => {
   if (e.target.value === '__new') { await newTerm(); return; }
   await flush();

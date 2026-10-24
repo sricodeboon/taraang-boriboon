@@ -12,8 +12,8 @@ $v = fn(string $f) => @filemtime(APP_ROOT . '/' . $f);
 
 // import map: ทุกโมดูลได้ ?v=เวลาแก้ไฟล์ — อัปโหลดเวอร์ชันใหม่แล้วเบราว์เซอร์ไม่ใช้ไฟล์เก่าจากแคชปนกับของใหม่
 // (import './data.js' ภายในโมดูลถูกแมปผ่าน URL เต็มจึงได้เวอร์ชันด้วย · worker ใช้ import.meta.resolve() อ่านเวอร์ชันจาก map นี้)
-$mods = ['store.js', 'rules.js', 'notify.js', 'board.js', 'mascot.js', 'data.js', 'periods.js', 'export.js', 'school.js', 'geo.js', 'curriculum.js', 'wizard.js', 'import.js', 'pdf.js', 'solver/solver.js', 'solver/solver.worker.js'];
-$preloadN = 11; // ถึง curriculum.js (wizard.js/import.js/pdf.js/solver โหลดทีหลัง)
+$mods = ['store.js', 'rules.js', 'notify.js', 'motion.js', 'board.js', 'mascot.js', 'data.js', 'periods.js', 'export.js', 'school.js', 'geo.js', 'curriculum.js', 'wizard.js', 'import.js', 'pdf.js', 'solver/solver.js', 'solver/solver.worker.js'];
+$preloadN = 12; // ถึง curriculum.js (wizard.js/import.js/pdf.js/solver โหลดทีหลัง)
 $map = [];
 foreach ($mods as $m) $map['./assets/' . $m] = './assets/' . $m . '?v=' . $v('assets/' . $m);
 $importMap = '<script type="importmap" nonce="' . csp_nonce() . '">' . $js(['imports' => $map]) . '</script>';
@@ -36,24 +36,34 @@ page_head('จัดตาราง · ' . $school['name'], '<style>' . file_get
 ?>
 <div id="app" class="app">
   <header class="bar">
-    <?= brand_html('app.php') ?>
-    <div class="bar-school">
-      <img id="school-logo" class="school-logo" alt="" width="28" height="28" <?= $school['logo_rev'] ? 'src="logo.php?v=' . (int) $school['logo_rev'] . '"' : 'hidden' ?>>
-      <b id="school-name"><?= h($school['name']) ?></b>
-      <select id="term-select" class="input input-sm" aria-label="ภาคเรียน"></select>
+    <?php // มือถือ ≤640px: แถว 1 (56px ติดจอ) = โลโก้ · ชื่อโรงเรียน · จุดสถานะบันทึก · เมนู ⋯ — แถว 2 (44px ไม่ติดจอ) = ภาคเรียน
+          // เดสก์ท็อป: board.css ทำให้ทั้งสองแถวเป็นแถบเดียวเหมือนเดิม (display:contents) และเมนู ⋯ กางเป็นปุ่มเรียงตามปกติ ?>
+    <div class="bar-row1">
+      <?= brand_html('app.php') ?>
+      <div class="bar-school">
+        <img id="school-logo" class="school-logo" alt="" width="28" height="28" <?= $school['logo_rev'] ? 'src="logo.php?v=' . (int) $school['logo_rev'] . '"' : 'hidden' ?>>
+        <b id="school-name"><?= h($school['name']) ?></b>
+      </div>
+      <?php // textContent ของ #save-state คงเดิม (app.js เขียนทับทั้งก้อน) · มือถือแสดงเป็นจุดสี: ทอง = กำลังบันทึก/รอ · ฟ้า = บันทึกแล้ว · แดง = ผิดพลาด ?>
+      <span id="save-state" class="pill" aria-live="polite">กำลังโหลด…</span>
+      <details class="bar-more">
+        <summary aria-label="เมนูเพิ่มเติม" title="เมนูเพิ่มเติม"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/></svg></summary>
+        <div class="bar-user">
+          <?php if (is_admin($user)): ?><a class="btn btn-sm" href="<?= $fbNew ? 'admin-feedback.php?s=new' : 'admin.php' ?>"<?= $fbNew ? ' title="มีข้อเสนอแนะใหม่ ' . $fbNew . ' ข้อความ"' : '' ?>>ผู้ดูแลระบบ<?php if ($fbNew): ?><span class="nbadge" aria-label="ใหม่ <?= $fbNew ?> ข้อความ"><?= $fbNew > 99 ? '99+' : $fbNew ?></span><?php endif; ?></a><?php endif; ?>
+          <?php // ปุ่มเดียว: กล่องบริจาคกับฟอร์มข้อเสนอแนะอยู่ติดกันในแท็บส่งออก ?>
+          <?php if ($donateBox !== ''): ?><a class="btn btn-sm bar-support" href="#donate" title="เลี้ยงโอวัลตินครูแจ็ก · ส่งข้อเสนอแนะ · ช่องทางติดต่อ">สนับสนุน·ติดต่อ</a>
+          <?php else: ?><a class="btn btn-sm bar-support" href="#feedback">แนะนำ·ติดต่อ</a><?php endif; ?>
+          <a class="btn btn-sm" href="../khlang/" title="คลังบริบูรณ์ ทะเบียนครุภัณฑ์ (ใช้บัญชีเดียวกัน)">ครุภัณฑ์</a>
+          <a class="btn btn-sm" href="guide.php" target="_blank" rel="noopener">คู่มือ</a>
+          <form method="post" action="auth/logout.php">
+            <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
+            <button class="btn btn-sm" type="submit" title="<?= h($user['name'] ?? '') ?>">ออกจากระบบ</button>
+          </form>
+        </div>
+      </details>
     </div>
-    <span id="save-state" class="pill" aria-live="polite">กำลังโหลด…</span>
-    <div class="bar-user">
-      <?php if (is_admin($user)): ?><a class="btn btn-sm" href="<?= $fbNew ? 'admin-feedback.php?s=new' : 'admin.php' ?>"<?= $fbNew ? ' title="มีข้อเสนอแนะใหม่ ' . $fbNew . ' ข้อความ"' : '' ?>>ผู้ดูแลระบบ<?php if ($fbNew): ?><span class="nbadge" aria-label="ใหม่ <?= $fbNew ?> ข้อความ"><?= $fbNew > 99 ? '99+' : $fbNew ?></span><?php endif; ?></a><?php endif; ?>
-      <?php // ปุ่มเดียว: กล่องบริจาคกับฟอร์มข้อเสนอแนะอยู่ติดกันในแท็บส่งออก — สองปุ่มทำให้แถบบนจอ 390px ขึ้น 2 แถว ?>
-      <?php if ($donateBox !== ''): ?><a class="btn btn-sm bar-support" href="#donate" title="เลี้ยงโอวัลตินครูแจ็ก · ส่งข้อเสนอแนะ · ช่องทางติดต่อ">สนับสนุน·ติดต่อ</a>
-      <?php else: ?><a class="btn btn-sm bar-support" href="#feedback">แนะนำ·ติดต่อ</a><?php endif; ?>
-      <a class="btn btn-sm" href="../khlang/" title="คลังบริบูรณ์ ทะเบียนครุภัณฑ์ (ใช้บัญชีเดียวกัน)">ครุภัณฑ์</a>
-      <a class="btn btn-sm" href="guide.php" target="_blank" rel="noopener">คู่มือ</a>
-      <form method="post" action="auth/logout.php">
-        <input type="hidden" name="csrf" value="<?= h(csrf_token()) ?>">
-        <button class="btn btn-sm" type="submit" title="<?= h($user['name'] ?? '') ?>">ออกจากระบบ</button>
-      </form>
+    <div class="bar-row2">
+      <select id="term-select" class="input input-sm" aria-label="ภาคเรียน"></select>
     </div>
   </header>
 
@@ -80,6 +90,6 @@ page_head('จัดตาราง · ' . $school['name'], '<style>' . file_get
   </div>
   <div id="toast" class="toast" role="status" hidden></div>
 </div>
-<script nonce="<?= csp_nonce() ?>">window.TT = { csrf: <?= json_encode(csrf_token()) ?>, school: <?= $js(school_public($school)) ?>, owner: <?= is_owner($user) ? 'true' : 'false' ?>, flash: <?= $js(flash()) ?>, flashKind: <?= $js(flash_kind()) ?>, cur: <?= $js($curMap ?: new stdClass()) ?>, boot: <?= $js(['terms' => $bootTerms, 'term' => $bootTerm]) ?>, mascot: <?= $js($mascotV ?: new stdClass()) ?> };</script>
+<script nonce="<?= csp_nonce() ?>">window.TT = { csrf: <?= json_encode(csrf_token()) ?>, school: <?= $js(school_public($school) + ['guest' => ($user['provider'] ?? '') === 'guest']) ?>, owner: <?= is_owner($user) ? 'true' : 'false' ?>, flash: <?= $js(flash()) ?>, flashKind: <?= $js(flash_kind()) ?>, cur: <?= $js($curMap ?: new stdClass()) ?>, boot: <?= $js(['terms' => $bootTerms, 'term' => $bootTerm]) ?>, mascot: <?= $js($mascotV ?: new stdClass()) ?> };</script>
 <script type="module" nonce="<?= csp_nonce() ?>" src="assets/app.js?v=<?= $v('assets/app.js') ?>"></script>
 <?php page_foot();

@@ -9,6 +9,7 @@ import * as notify from './notify.js';
 import * as school from './school.js';
 import { openCatalog } from './curriculum.js';
 import { bustImg } from './mascot.js';
+import * as motion from './motion.js';
 
 let section = null; // null = ยังไม่ได้เลือก → "ห้องเรียน" เมื่อยังไม่มีครู, "การสอน" เมื่อมีครูแล้ว (ตัวช่วยเริ่มต้นพามาที่ "ครู" เอง)
 let filterClass = null; // null = ยังไม่ได้เลือก → โรงเรียนใหญ่เริ่มที่ห้องแรก (ทุกห้องพร้อมกันหน่วงบนมือถือ)
@@ -45,9 +46,10 @@ export function render(el) {
   const sec = section || (d.teachers.length ? 'assignments' : 'classes');
   const counts = { classes: d.classes.length, teachers: d.teachers.length, subjects: d.subjects.length, rooms: d.rooms.length, assignments: d.assignments.length };
   el.innerHTML = `<div class="data-nav" role="group" aria-label="ประเภทข้อมูล">
-      ${SECTIONS.map(([k, n]) => `<button data-sec="${k}" aria-pressed="${k === sec}">${n}${k in counts ? ` <span class="muted">${counts[k]}</span>` : ''}</button>`).join('')}
+      ${SECTIONS.map(([k, n]) => `<button data-sec="${k}" aria-pressed="${k === sec}">${n}${k in counts ? ` <span class="muted nav-n" data-k="${k}">${counts[k]}</span>` : ''}</button>`).join('')}
     </div>
     <div class="card data-card" id="data-body"></div>`;
+  animateCounts(el, counts);
   el.querySelectorAll('[data-sec]').forEach((b) => b.addEventListener('click', () => { section = b.dataset.sec; onlyNoTeacher = false; render(el); }));
   const body = el.querySelector('#data-body');
   // ปุ่มในกล่อง "ยังไม่มี…" กดแทนปุ่มเดิมบนหัวตาราง (ใช้ตัวจัดการเดิม ไม่เขียนซ้ำ)
@@ -57,6 +59,38 @@ export function render(el) {
   });
   ({ classes: classesView, teachers: teachersView, subjects: subjectsView, rooms: roomsView, assignments: assignmentsView, school: school.render })[sec](body);
 }
+
+// ---------- ตัวเลขในชิปหมวดเปลี่ยน → เด้ง + นับขึ้น/ลง (DELIGHT §3.3) ----------
+// จำค่ารอบก่อนต่อภาคเรียน · ครั้งแรกของภาคเรียนไม่เล่น ยกเว้นตัวช่วยเริ่มต้นตั้งฐานไว้ (countFrom) ให้นับจาก 0
+let navPrev = null, navTerm = null;
+/** ตั้งฐานของตัวเลขชิปหมวด (เช่น ตัวช่วยเริ่มต้น: ทุกหมวดเริ่มจาก 0) — วาดรอบหน้าจะนับจากค่านี้ */
+export function countFrom(base) { navPrev = { ...base }; navTerm = store.termId; }
+function animateCounts(el, counts) {
+  const prev = navTerm === store.termId ? navPrev : null;
+  navPrev = { ...counts }; navTerm = store.termId;
+  if (!prev) return;
+  el.querySelectorAll('.nav-n').forEach((sp) => {
+    const k = sp.dataset.k;
+    if (prev[k] == null || prev[k] === counts[k]) return;
+    motion.countUp(sp, counts[k], { from: prev[k], dur: 700 });
+    motion.pop(sp);
+  });
+}
+
+// ---------- แถวที่เพิ่งเพิ่ม (วางรายชื่อ) → ไหลเข้า + พื้นทองจาง ----------
+// เหตุการณ์ tt:added { kind: 'teachers'|'subjects'|'assignments', ids } (สัญญากับครูบูรณ์/แพ็กเกจอื่น) — ยิงหลังวาดตารางใหม่แล้ว
+document.addEventListener('tt:added', (e) => {
+  const ids = new Set(e.detail?.ids || []);
+  if (!ids.size || !root) return;
+  const rows = [...root.querySelectorAll('#data-body tbody tr[data-id]')].filter((tr) => ids.has(tr.dataset.id));
+  const step = Math.min(28, 700 / Math.max(1, rows.length));
+  rows.forEach((tr, i) => {
+    tr.style.setProperty('--i', String(i));
+    tr.style.animationDelay = `calc(${(i * step).toFixed(1)}ms * var(--m, 1))`;
+    motion.once(tr, 'm-in-l').then(() => { tr.style.animationDelay = ''; });
+    for (const td of tr.cells) td.classList.add('m-flash'); // flash = พื้นทองจางออก (ค้าง class ไว้ได้ ไม่วนซ้ำ)
+  });
+});
 
 // สไตล์ของส่วนที่เพิ่มในรุ่นนี้ (ชิปกลุ่มสาระ แถวยังไม่มีครู แถบภาระครู กล่องวางรายชื่อ) — ฝังครั้งเดียวต่อหน้า
 // สี "ยังว่าง/ต้องตรวจ" = ทอง-ส้ม (--gold/--gold-soft มีค่าโหมดมืดแล้ว) · ไม่มี border-left · ไม่มีสีเขียว
@@ -91,7 +125,15 @@ const CSS = `.pill.todo{color:var(--gold);border-color:#C8962E;background:var(--
 .imp-table tr.fix td{background:var(--gold-soft)}
 .imp-issue{display:block;color:var(--gold);font-size:.8rem;line-height:1.4}
 .imp-acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.imp-acts .spacer{flex:1}`;
+.imp-acts .spacer{flex:1}
+.data-nav .nav-n{display:inline-block;font-variant-numeric:tabular-nums}
+.vh{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.asg-table td.m-flash{animation-delay:calc(var(--fi,0) * 1ms * var(--m,1))}
+.pill.todo svg{width:13px;height:13px;flex:none}
+.auto-bar .num-up{display:inline-block;font-variant-numeric:tabular-nums}
+.imp-dlg .btn.tt-pulse1{animation:m-pulse calc(1.4s * var(--m,1)) var(--e-out,ease-out) 1}
+.imp-table tbody.m-stagger>tr{animation-delay:calc(var(--i,0) * var(--step,24ms) * var(--m,1))}
+@media (prefers-reduced-motion:reduce){.data-nav .nav-n{transition:none}}`;
 function ensureStyle() {
   if (document.getElementById('tt-data-css')) return;
   const s = document.createElement('style');
@@ -99,6 +141,9 @@ function ensureStyle() {
   s.textContent = CSS;
   document.head.appendChild(s);
 }
+
+// ไอคอนเตือน (สามเหลี่ยม) สำหรับแถว/ปุ่ม "ยังไม่มีครู" — สื่อด้วยรูป+สีพื้น ไม่ใช่แถบขอบซ้าย
+const WARN_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" style="flex:none;color:#C8962E"><path fill="currentColor" d="M12 2 1 21h22L12 2zm0 6 1 7h-2l1-7zm-1 9h2v2h-2v-2z"/></svg>';
 
 // ชื่อสั้นของกลุ่มสาระสำหรับชิป (ชื่อเต็มอยู่ใน title)
 const GROUP_SHORT = { TH: 'ไทย', MA: 'คณิต', SC: 'วิทย์', SO: 'สังคม', HE: 'สุข-พละ', AR: 'ศิลปะ', OC: 'การงาน', FL: 'ต่างประเทศ', EC: 'ปฐมวัย', GU: 'แนะแนว' };
@@ -217,7 +262,7 @@ function teachersView(el) {
     `<div class="scroll-x"><table class="table"><thead><tr><th>ชื่อครู</th><th>ชื่อย่อ</th><th>กลุ่มสาระ · ประจำชั้น</th><th title="จำนวนคาบสูงสุดต่อวัน 0 = ไม่จำกัด">สูงสุด (คาบ/วัน)</th><th>คาบไม่ว่าง</th><th>ภาระสอน</th><th></th></tr></thead><tbody>
     ${list.map((t, i) => {
       const n = load.get(t.id) || 0, cap = capOf(t, ao);
-      return `<tr${t.id === focus ? ' class="tr-focus"' : ''}><td><input class="input" data-i="${i}" data-f="name" value="${esc(t.name)}" aria-label="ชื่อครู"></td>
+      return `<tr data-id="${esc(t.id)}"${t.id === focus ? ' class="tr-focus"' : ''}><td><input class="input" data-i="${i}" data-f="name" value="${esc(t.name)}" aria-label="ชื่อครู"></td>
         <td style="width:110px"><input class="input" data-i="${i}" data-f="short" value="${esc(t.short || '')}" aria-label="ชื่อย่อ"></td>
         <td>${teacherChips(t, i)}</td>
         <td class="num"><input class="input" type="number" min="0" max="20" data-i="${i}" data-f="maxPerDay" value="${t.maxPerDay || 0}" title="0 = ไม่จำกัด" aria-label="คาบสูงสุดต่อวัน"></td>
@@ -244,6 +289,8 @@ function teachersView(el) {
     if (k >= 0) t.unavailable.splice(k, 1); else t.unavailable.push([day, p]);
     b.classList.toggle('on');
     store.commit('data');
+    // ช่องที่เพิ่งติ๊กเด้ง (ตารางถูกวาดใหม่ใน commit → หาปุ่มใหม่ตำแหน่งเดิม)
+    queueMicrotask(() => motion.pop(root?.querySelector(`.mini-grid button[data-t="${b.dataset.t}"][data-d="${day}"][data-p="${p}"]`)));
   }));
 }
 
@@ -303,7 +350,7 @@ function subjectsView(el) {
     `<div class="scroll-x"><table class="table"><thead><tr><th>สี</th><th>รหัส</th><th>ชื่อวิชา</th><th title="จำนวนคาบต่อสัปดาห์ตามโครงสร้างหลักสูตร">คาบ/สัปดาห์<br>ตามหลักสูตร</th><th>สอนใน</th><th></th></tr></thead><tbody>
     ${list.map((s, i) => {
       const n = classesOf.get(s.id)?.size || 0;
-      return `<tr><td style="width:60px"><input type="color" class="swatch" data-i="${i}" data-f="color" value="${esc(s.color || '#7FB0E8')}" aria-label="สีวิชา"></td>
+      return `<tr data-id="${esc(s.id)}"><td style="width:60px"><input type="color" class="swatch" data-i="${i}" data-f="color" value="${esc(s.color || '#7FB0E8')}" aria-label="สีวิชา"></td>
       <td style="width:130px"><input class="input mono" data-i="${i}" data-f="code" value="${esc(s.code || '')}" placeholder="ท21101" aria-label="รหัสวิชา"></td>
       <td><input class="input" data-i="${i}" data-f="name" value="${esc(s.name)}" aria-label="ชื่อวิชา"></td>
       <td class="num pw-cell"><input class="input" type="number" min="1" max="40" data-i="${i}" data-f="perWeek" data-nullable value="${s.perWeek ?? ''}" placeholder="—" aria-label="คาบต่อสัปดาห์ตามหลักสูตร ${esc(s.name)}">
@@ -392,7 +439,7 @@ function assignmentsView(el) {
     `<div class="toolbar" style="padding:10px 14px;margin:0;border-bottom:1px solid var(--line)">
       <label class="muted" for="flt">ดูเฉพาะห้อง</label>
       <select id="flt" class="input input-sm">${opt(d.classes, filterClass, 'ทุกห้อง')}</select>
-      ${noTeacher.length ? `<button class="btn btn-sm" data-only-none aria-pressed="${onlyNoTeacher}">เฉพาะที่ยังไม่มีครู <span class="muted">${noTeacher.length}</span></button>` : ''}
+      ${noTeacher.length ? `<button class="btn btn-sm" data-only-none aria-pressed="${onlyNoTeacher}">${WARN_ICON}เฉพาะที่ยังไม่มีครู <span class="muted">${noTeacher.length}</span></button>` : ''}
       ${ready ? '' : '<span class="pill warn">ต้องมีห้องเรียนและวิชาก่อน</span>'}
       <span class="spacer"></span>
       ${list.length && !onlyNoTeacher ? `<button class="btn btn-sm btn-danger" data-del-all>${delLabel}</button>` : ''}
@@ -408,12 +455,12 @@ function assignmentsView(el) {
       const dup = dupOf.has(a.id);
       const none = noTch(a);
       const notes = [
-        none ? '<span class="pill todo" title="แถวนี้ยังไม่ถูกนำไปจัดลงตารางจนกว่าจะเลือกครู">ยังไม่มีครู</span>' : '',
+        none ? `<span class="pill todo" title="แถวนี้ยังไม่ถูกนำไปจัดลงตารางจนกว่าจะเลือกครู">${WARN_ICON}ยังไม่มีครู</span>` : '',
         part ? `<span class="pill split" title="วิชาเดียวกัน ห้องเดียวกัน แบ่งให้ครู ${rows.length} คนสอน">แบ่งสอน ${part}/${rows.length}</span>` : '',
         dup ? `<span class="pill warn" title="ห้องนี้มีวิชานี้มากกว่า 1 แถว">ซ้ำ</span> <button class="btn btn-sm" data-merge="${i}">รวม</button>` : '',
         st && !st.ok ? `<span class="pill soft" title="คาบ/สัปดาห์ตามหลักสูตรของวิชานี้ (ตั้งที่ ข้อมูล → วิชา)">หลักสูตร ${st.target} คาบ/สัปดาห์${rows.length > 1 || dup ? ` · รวมตอนนี้ ${st.total}` : ''}</span>` : '',
       ].filter(Boolean).join(' ');
-      return `<tr class="${dup ? 'dup-row' : none ? 'todo-row' : part ? 'split-row' : ''}">
+      return `<tr data-id="${esc(a.id)}" class="${dup ? 'dup-row' : none ? 'todo-row' : part ? 'split-row' : ''}">
         <td><select class="input" data-i="${i}" data-f="classId" aria-label="ห้องเรียน">${opt(d.classes, a.classId)}</select></td>
         <td><select class="input" data-i="${i}" data-f="subjectId" aria-label="วิชา">${opt(subjectChoices(d, a, dup ? null : used), a.subjectId)}</select>${notes ? `<div class="row-note">${notes}</div>` : ''}</td>
         <td><select class="input" data-i="${i}" data-f="teacherId" data-nullable aria-label="ครู">${opt(d.teachers, a.teacherId, '— ยังไม่มีครู —')}</select></td>
@@ -421,7 +468,7 @@ function assignmentsView(el) {
         <td class="num"><input class="input" type="number" min="1" max="20" data-i="${i}" data-f="perWeek" value="${a.perWeek || 1}" aria-label="คาบต่อสัปดาห์"></td>
         <td class="num"><input class="input" type="number" min="0" max="10" data-i="${i}" data-f="doubles" value="${a.doubles || 0}" title="จำนวนคู่คาบติดกันต่อสัปดาห์" aria-label="จำนวนคาบคู่"></td>
         <td><span class="pill ${remaining(a) ? '' : 'ok'}">${(a.perWeek || 0) - remaining(a)}/${a.perWeek || 0}</span></td>
-        <td class="act-cell">${part ? `<button class="btn btn-sm" data-unsplit="${i}" title="รวมแถวแบ่งสอนกลับเป็นแถวเดียว">รวมกลับ</button>` : dup ? '' : `<button class="btn btn-sm" data-split="${i}" title="วิชาเดียวกันสอนโดย 2 ครู แยกคาบกัน">แบ่งสอน</button>`}
+        <td class="act-cell">${part ? `<button class="btn btn-sm" data-unsplit="${i}" title="รวมแถวแบ่งสอนกลับเป็นแถวเดียว">รวมกลับ</button>` : dup ? '' : ((a.perWeek || 0) < 2 ? `<button class="btn btn-sm" data-split="${i}" disabled title="แบ่งได้เมื่อมี ≥2 คาบ">แบ่งสอน</button>` : `<button class="btn btn-sm" data-split="${i}" title="วิชาเดียวกันสอนโดย 2 ครู แยกคาบกัน">แบ่งสอน</button>`)}
           <button class="btn btn-sm btn-danger" data-del="${i}">ลบ</button></td></tr>`;
     }).join('') || (onlyNoTeacher ? '<tr><td colspan="8" class="muted">ห้องนี้ทุกแถวมีครูแล้ว — กด “เฉพาะที่ยังไม่มีครู” อีกครั้งเพื่อดูทุกแถว</td></tr>'
       : emptyRow(8, 'ยังไม่มีการสอนครับ บอกว่าใครสอนวิชาอะไร ห้องไหน กี่คาบ ขั้นนี้ขั้นเดียวแล้วกดจัดได้เลย', [['+ เพิ่มการสอน', 'add', true], ['วางภาระสอน…', 'paste']]))}</tbody></table></div>
@@ -432,7 +479,7 @@ function assignmentsView(el) {
   el.querySelector('[data-go-board]')?.addEventListener('click', () => document.dispatchEvent(new CustomEvent('tt:goto', { detail: { tab: 'board' } })));
   el.querySelector('[data-go-teachers]')?.addEventListener('click', () => { section = 'teachers'; render(root); });
   el.querySelector('[data-paste]').addEventListener('click', () => openPaste('workload'));
-  el.querySelector('[data-auto]')?.addEventListener('click', () => runAutoAssign());
+  el.querySelector('[data-auto]')?.addEventListener('click', (e) => runAutoAssign(e.currentTarget));
   el.querySelector('[data-opt-core]')?.addEventListener('change', (e) => { userOpts.homeroomTeachesCore = e.target.checked; render(root); });
   el.querySelector('[data-opt-max]')?.addEventListener('change', (e) => {
     const n = Math.trunc(Number(e.target.value));
@@ -482,8 +529,10 @@ function assignmentsView(el) {
   el.querySelectorAll('[data-split]').forEach((b) => b.addEventListener('click', () => {
     const a = all[+b.dataset.split];
     if (!a) return;
+    if ((a.perWeek || 0) < 2) { notify.warn('แบ่งได้เมื่อมี ≥2 คาบ — เพิ่มคาบ/สัปดาห์ของแถวนี้ก่อน'); return; }
     if (d.teachers.length < 2) { notify.warn('ต้องมีครูอย่างน้อย 2 คนจึงแบ่งสอนได้ (เพิ่มครูที่ ข้อมูล → ครู)'); return; }
     const nb = splitAssignment(d, a, uid('a'));
+    if (!nb) { notify.warn('แบ่งได้เมื่อมี ≥2 คาบ — เพิ่มคาบ/สัปดาห์ของแถวนี้ก่อน'); return; } // rules ตอบว่าแบ่งไม่ได้ = ไม่แก้เอกสาร
     store.commit('data'); render(root);
     notify.ok(`แบ่งสอนแล้ว: ${a.perWeek} + ${nb.perWeek} คาบ/สัปดาห์ · เลือกครูคนที่สองในแถวใหม่ (ตอนนี้: ${idx.tch.get(nb.teacherId)?.name || '-'})`, 6000);
   }));
@@ -537,7 +586,7 @@ function autoBar(d, n, ao) {
   }
   const hasInfo = d.teachers.some((t) => (Array.isArray(t.subjects) && t.subjects.length) || t.homeroom);
   return `<div class="auto-bar" role="group" aria-label="เติมครูอัตโนมัติ">
-      <button class="btn btn-sm btn-primary" data-auto>เติมครูอัตโนมัติ (${n} แถว)</button>
+      <button class="btn btn-sm btn-primary" data-auto><span>เติมครูอัตโนมัติ (<span class="num-up">${n}</span> แถว)</span></button>
       <label><input type="checkbox" data-opt-core ${ao.homeroomTeachesCore ? 'checked' : ''}> ครูประจำชั้นสอนวิชาหลักเอง</label>
       <label>เพดาน <input class="input input-sm" type="number" min="1" max="60" data-opt-max value="${ao.maxPerWeek}" aria-label="เพดานคาบต่อสัปดาห์ของครูแต่ละคน"> คาบ/สัปดาห์/คน</label>
       <span class="hint">${hasInfo
@@ -546,9 +595,19 @@ function autoBar(d, n, ao) {
     </div>`;
 }
 
-function runAutoAssign() {
+/**
+ * เติมครูอัตโนมัติ (DELIGHT §3.8): ปุ่มหมุน ≥ 300ms → แก้เอกสาร + commit ครั้งเดียว (เดิม) → ตารางวาดใหม่ →
+ * ช่องครูของแถวที่ได้ครูพื้นทองจางไล่ทีละแถว · 12 แถวแรกที่เห็นบนจอ: ชิปชื่อครูบินจากปุ่มลงช่อง · เหลือแถวไม่มีครู = ปุ่มกรองเรือง
+ * ยิง tt:autoassigned { changed:[assignmentId], left } ให้ครูบูรณ์ · ลดภาพเคลื่อนไหว = ไม่มีบิน/ไล่ พื้นส้ม+ไอคอนยังบอกแถวที่ขาด
+ */
+export async function runAutoAssign(btn = root?.querySelector('[data-auto]')) {
   const d = store.doc;
-  const r = autoAssign(d, assignOpts());
+  const from = btn?.getBoundingClientRect();
+  const nBefore = d.assignments.filter(noTch).length;
+  let r;
+  try { r = await notify.busy(btn, () => autoAssign(d, assignOpts()), { label: 'กำลังเลือกครู', done: 'เติมแล้ว', min: 300 }); }
+  catch (e) { notify.error('เติมครูไม่สำเร็จ: ' + e.message); return; }
+  if (!r || store.doc !== d) return; // กดซ้ำระหว่างหมุน / เปลี่ยนภาคเรียนระหว่างรอ
   if (!r.changes.length) {
     notify.warn(`ยังหาครูให้ไม่ได้สักแถว (${r.unresolved.length} แถว) — ระบุกลุ่มสาระ/ประจำชั้นของครูที่ ข้อมูล → ครู หรือเพิ่มเพดานคาบ แล้วลองอีกครั้ง`, 8000);
     return;
@@ -556,12 +615,61 @@ function runAutoAssign() {
   const n = applyAssign(d, r.changes);
   store.commit('autoassign'); // แท็บนี้วาดใหม่เองผ่าน onChange
   const left = d.assignments.filter(noTch).length;
+  const changed = r.changes.map((c) => c.assignmentId);
+  celebrateAssigned(changed, from, nBefore, left);
+  document.dispatchEvent(new CustomEvent('tt:autoassigned', { detail: { changed, left } }));
   notify.action(`เติมครู ${n} แถว${left ? ` · เหลือ ${left} แถวยังไม่มีครู` : ' · ครบทุกแถวแล้ว'}`, 'เลิกทำ', () => {
     if (store.doc !== d) return; // เปลี่ยนภาคเรียนไปแล้ว
     const k = undoAssign(d, r.changes);
     store.commit('undo');
     notify.ok(`คืนค่าแล้ว ${k} แถว`);
   }, 10000);
+}
+
+/** ฉากหลังเติมครู (อ่านจาก DOM ที่เพิ่งวาด · ไม่มี setTimeout ต่อชิ้น: ใช้ animation-delay / WAAPI delay) */
+function celebrateAssigned(changed, from, nBefore, left) {
+  const body = root?.querySelector('#data-body');
+  if (!body) return;
+  const ids = new Set(changed);
+  const rows = [...body.querySelectorAll('.asg-table tbody tr[data-id]')].filter((tr) => ids.has(tr.dataset.id));
+  const step = Math.min(30, 900 / Math.max(1, rows.length));
+  rows.forEach((tr, i) => {
+    const td = tr.cells[2];
+    if (!td) return;
+    td.style.setProperty('--fi', (i * step).toFixed(1));
+    motion.once(td, 'm-flash');
+  });
+  // ป้ายจำนวนบนปุ่ม (ถ้ายังเหลือ) นับลงจากจำนวนเดิม · ปุ่มกรอง "เฉพาะที่ยังไม่มีครู" เรือง
+  const num = body.querySelector('[data-auto] .num-up');
+  if (num) motion.countUp(num, left, { from: nBefore, dur: 600 });
+  if (left) motion.pulse(body.querySelector('[data-only-none]'));
+  if (!from || motion.still()) return;
+  const vh = innerHeight || 800;
+  const seen = rows.map((tr) => tr.cells[2]).filter((td) => { const b = td?.getBoundingClientRect(); return b && b.bottom > 0 && b.top < vh; }).slice(0, 12);
+  seen.forEach((td, k) => {
+    const a = idx.asg.get(td.parentElement.dataset.id);
+    const t = a && idx.tch.get(a.teacherId);
+    if (t) flyChip(from, td, t.short || t.name, k * 60);
+  });
+}
+
+/** ชิปชื่อครู (ภาพครูบูรณ์ 20px + ชื่อ) บินจากตำแหน่งปุ่มเดิมลงช่องครู แล้วช่องเด้ง · ghost ลบตัวเองเมื่อจบ/ถูกยกเลิก */
+function flyChip(a, td, name, delay) {
+  const g = document.createElement('div');
+  g.className = 'm-ghost';
+  g.setAttribute('aria-hidden', 'true');
+  g.innerHTML = `<span class="fly-chip">${bustImg('')}${esc(name)}</span>`;
+  document.body.appendChild(g);
+  const r = g.getBoundingClientRect(), b = td.getBoundingClientRect();
+  const x0 = a.left + (a.width - r.width) / 2, y0 = a.top + (a.height - r.height) / 2;
+  const x1 = b.left + 8, y1 = b.top + (b.height - r.height) / 2;
+  const lift = Math.min(40, Math.abs(y1 - y0) * 0.25 + 12);
+  const anim = motion.play(g, [
+    { transform: `translate(${x0}px,${y0}px) scale(.9)`, opacity: 0 },
+    { transform: `translate(${(x0 + x1) / 2}px,${Math.min(y0, y1) - lift}px) scale(1.04)`, opacity: 1, offset: 0.45 },
+    { transform: `translate(${x1}px,${y1}px) scale(.92)`, opacity: 0.9 },
+  ], { duration: 520, delay, easing: motion.EASE.springSoft, fill: 'both' });
+  Promise.resolve(anim.finished).then(() => { g.remove(); motion.pop(td.querySelector('select') || td); }, () => g.remove());
 }
 
 /** แถบภาระครูใต้ตาราง: คาบ/สัปดาห์ของแต่ละคนเทียบเพดาน (เกิน = สีส้ม) */
@@ -588,7 +696,8 @@ const PASTE = {
 };
 const drafts = {}; // ข้อความที่วางไว้ล่าสุดของแต่ละแบบ (ปิดกล่องแล้วเปิดใหม่ไม่ต้องวางซ้ำ) — อยู่ในหน่วยความจำเท่านั้น
 
-async function openPaste(kind) {
+/** เปิดกล่องวางรายชื่อ (teachers | subjects | workload) — export ให้ตัวช่วยเริ่มต้นเปิดต่อได้ทันที (ผ่าน import.openPaste) · คืน <dialog> */
+export async function openPaste(kind) {
   let imp;
   try { imp = await import('./import.js'); } catch { notify.error('โหลดตัวช่วยวางรายชื่อไม่สำเร็จ ลองรีเฟรชหน้าอีกครั้ง'); return; }
   const d = store.doc, cfg = PASTE[kind];
@@ -613,12 +722,16 @@ async function openPaste(kind) {
         <button type="button" class="btn btn-primary" data-next>ตรวจก่อนเพิ่ม →</button></div></div>`;
     const ta = dlg.querySelector('[data-text]');
     dlg.querySelector('[data-close]').addEventListener('click', () => dlg.close());
+    // มีข้อความครั้งแรก → ปุ่ม "ตรวจก่อนเพิ่ม" เรือง 1 ครั้ง (บอกว่าขั้นต่อไปอยู่ตรงนี้)
+    let pulsed = false;
+    const nudge = () => { if (pulsed || !ta.value.trim()) return; pulsed = true; motion.once(dlg.querySelector('[data-next]'), 'tt-pulse1'); };
+    ta.addEventListener('input', nudge);
     dlg.querySelector('[data-example]').addEventListener('click', (e) => {
       const ex = dlg.querySelector('[data-ex]');
       ex.textContent = imp.EXAMPLES[kind].replace(/\t/g, '  |  ');
       ex.hidden = !ex.hidden;
       e.currentTarget.setAttribute('aria-expanded', String(!ex.hidden));
-      if (!ta.value.trim()) ta.value = imp.EXAMPLES[kind]; // ช่องว่าง → ใส่ตัวอย่างให้ลองกดต่อได้เลย
+      if (!ta.value.trim()) { ta.value = imp.EXAMPLES[kind]; nudge(); } // ช่องว่าง → ใส่ตัวอย่างให้ลองกดต่อได้เลย
     });
     dlg.querySelector('[data-next]').addEventListener('click', () => {
       const text = ta.value;
@@ -630,6 +743,7 @@ async function openPaste(kind) {
       previewStep();
     });
     ta.focus();
+    if (ta.value.trim()) requestAnimationFrame(nudge); // ข้อความเดิมที่จำไว้
   };
 
   // ---------- พรีวิว ----------
@@ -688,13 +802,17 @@ async function openPaste(kind) {
     workload: '<th></th><th>ครู</th><th>วิชา</th><th>ห้อง</th><th>คาบ</th><th>คู่</th><th>ต้องตรวจ</th>',
   };
 
+  let shownAdd = 0; // ตัวเลขบนปุ่มเพิ่มนับจากค่าที่แสดงอยู่ → ค่าใหม่
   const counts = () => {
     const add = res.rows.filter(willAdd).length, fix = res.rows.filter(needsFix).length;
     const nNew = kind === 'workload' ? (res.newTeachers || []).filter((t) => t.include && res.rows.some((r) => r.newTeacher === t.key && willAdd(r))).length : 0;
     dlg.querySelector('[data-sum]').innerHTML = `อ่านได้ <b>${res.rows.length}</b> แถว · จะเพิ่ม <b>${add}</b> ${cfg.unit}${nNew ? ` · สร้างครูใหม่ <b>${nNew}</b> คน` : ''}${fix ? ` · <span class="pill todo">ต้องตรวจ ${fix} แถว</span>` : ''}`;
     const ok = dlg.querySelector('[data-ok]');
-    ok.textContent = add ? `เพิ่ม ${add} ${cfg.unit}` : 'ไม่มีรายการที่จะเพิ่ม';
+    // ตัวเลขที่ขยับ aria-hidden · ข้อความจริงสำหรับโปรแกรมอ่านจอ (และค่าปลายที่ถูกต้องเสมอ) อยู่ใน .vh
+    ok.innerHTML = add ? `<span aria-hidden="true">เพิ่ม <span class="num-up">${shownAdd}</span> ${cfg.unit}</span><span class="vh">เพิ่ม ${add} ${cfg.unit}</span>` : 'ไม่มีรายการที่จะเพิ่ม';
     ok.disabled = !add;
+    if (add) motion.countUp(ok.querySelector('.num-up'), add, { from: shownAdd, dur: 500 });
+    shownAdd = add;
   };
 
   const previewStep = () => {
@@ -710,7 +828,19 @@ async function openPaste(kind) {
         <button type="button" class="btn btn-sm" data-back>← แก้ข้อความ</button><span class="spacer"></span>
         <button type="button" class="btn" data-close>ยกเลิก</button>
         <button type="button" class="btn btn-primary" data-ok></button></div></div>`;
+    shownAdd = 0;
     counts();
+    // แถวไหลเข้าไล่ทีละแถว (รวม ≤ 700ms แม้ 120+ แถว) · แถวต้องตรวจส่ายเบา 1 ครั้งหลังไหลครบ · ป้าย "ต้องตรวจ" เด้ง
+    const tbody = dlg.querySelector('.imp-table tbody');
+    const trs = [...tbody.rows];
+    tbody.classList.add('m-stagger');
+    const step = motion.staggerVars(tbody, { each: 28, max: 700 });
+    trs.forEach((tr) => tr.classList.add('m-in-l'));
+    const after = trs.length * step + 320 + 120;
+    trs.filter((tr) => tr.classList.contains('fix')).forEach((tr) => motion.play(tr, [
+      { transform: 'translateX(0)' }, { transform: 'translateX(-3px)' }, { transform: 'translateX(3px)' }, { transform: 'translateX(-2px)' }, { transform: 'translateX(0)' },
+    ], { duration: 360, delay: after, easing: motion.EASE.io }));
+    motion.pop(dlg.querySelector('[data-sum] .pill'));
     dlg.querySelector('[data-back]').addEventListener('click', pasteStep);
     dlg.querySelector('[data-close]').addEventListener('click', () => dlg.close());
     dlg.querySelector('[data-ok]').addEventListener('click', () => {
@@ -767,6 +897,7 @@ async function openPaste(kind) {
 
   pasteStep();
   dlg.showModal();
+  return dlg;
 }
 
 /** ยืนยันการวาง: แก้เอกสารครั้งเดียว → commit('import') ครั้งเดียว → toast เลิกทำ 10 วินาที */
@@ -790,6 +921,11 @@ function commitImport(imp, kind, d, res) {
   const n = (out.teachers?.length || 0) + (out.subjects?.length || 0) + (out.assignments?.length || 0) + (out.changed?.length || 0);
   if (!n) { notify.info('ไม่มีรายการที่เพิ่ม'); return; }
   store.commit('import'); // แท็บนี้วาดใหม่เองผ่าน onChange
+  // บอกทุกคนว่าเพิ่มอะไร (data.js วาดแถวใหม่ไหลเข้า · ครูบูรณ์/แพ็กเกจอื่นฟังได้) — ยิงหลังตารางวาดใหม่แล้ว
+  const fire = (k, ids) => { if (ids?.length) document.dispatchEvent(new CustomEvent('tt:added', { detail: { kind: k, ids: [...ids] } })); };
+  fire('teachers', out.teachers);
+  fire('subjects', out.subjects);
+  fire('assignments', [...(out.assignments || []), ...(out.changed || []).map((c) => c.id)]);
   notify.action(msg, 'เลิกทำ', () => {
     if (store.doc !== d) return;
     imp.undoImport(d, out);

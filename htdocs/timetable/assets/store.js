@@ -70,8 +70,12 @@ function sanitize(d) {
   }
   fillSubjectPerWeek(d, store.curriculum);
   for (const a of d.assignments) {
-    if (a.perWeek != null) a.perWeek = Math.max(0, toInt(a.perWeek));
-    if (a.doubles != null) a.doubles = Math.max(0, toInt(a.doubles));
+    // เพดาน 60 คาบ/สัปดาห์ (ตรงกับ solver MAX_PER_ASSIGNMENT) — ไฟล์สำรองแก้มือใส่ค่าใหญ่ผิดปกติแล้วจัดค้างได้
+    if (a.perWeek != null) a.perWeek = Math.min(MAX_PER_WEEK, Math.max(0, toInt(a.perWeek)));
+    if (a.doubles != null) {
+      a.doubles = Math.max(0, toInt(a.doubles));
+      if (typeof a.perWeek === 'number') a.doubles = Math.min(Math.floor(a.perWeek / 2), a.doubles);
+    }
     // แบ่งสอน: id กลุ่มเป็นข้อความสั้น ๆ เท่านั้น
     if (a.split != null && !(typeof a.split === 'string' && /^[\w-]{1,40}$/.test(a.split))) delete a.split;
   }
@@ -81,8 +85,22 @@ function sanitize(d) {
   // seed ของการจัดอัตโนมัติ (ผลเหมือนเดิมทุกครั้งจนกว่าจะกด "สุ่มแบบใหม่") — จำนวนเต็มเท่านั้น
   if (d.settings.solveSeed != null) { const n = Math.trunc(Number(d.settings.solveSeed)); if (Number.isSafeInteger(n)) d.settings.solveSeed = n; else delete d.settings.solveSeed; }
   sanitizeMeta(d);
-  for (const x of [...d.locks, ...d.placements]) { x.day = toInt(x.day); x.period = toInt(x.period); }
+  // วัน/คาบต้องเป็นจำนวนเต็ม ≥ 0 — ค่าเสีย (NaN, 'abc', 1.5, −1) ตัดทิ้งในอาร์เรย์เดิม (เดิมแปลงเป็น 0 = คาบย้ายไปจันทร์คาบแรกเงียบ ๆ)
+  // ค่าเกินช่วงวัน/คาบของตารางคงไว้ (ไม่ตัด ไม่ย้าย — ลดคาบ/วันแล้วเพิ่มกลับ คาบยังอยู่) · null/ไม่มีค่า = 0 ตามเดิม
+  const slotInt = (v) => { const n = v == null ? 0 : Number(v); return Number.isInteger(n) && n >= 0 ? n : -1; };
+  for (const list of [d.locks, d.placements]) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const x = list[i], day = slotInt(x.day), period = slotInt(x.period);
+      if (day < 0 || period < 0) { list.splice(i, 1); continue; }
+      x.day = day; x.period = period;
+    }
+  }
+  // ปักหมุด: เก็บเป็นจริง/เท็จ (ไฟล์สำรองอาจเป็น 'yes', 1, '0')
+  for (const p of d.placements) if (p.pinned != null && typeof p.pinned !== 'boolean') p.pinned = !(!p.pinned || /^(0|false|no)$/i.test(String(p.pinned)));
 }
+
+/** เพดานคาบ/สัปดาห์ต่อการสอน (ตรงกับ solver) */
+export const MAX_PER_WEEK = 60;
 
 // ข้อมูลประกอบของภาคเรียน (ไม่ใช่ข้อมูลตาราง): meta.lastSolve = ผลจัดล่าสุด (แอดมินอ่าน) · meta.setup = คำตอบตัวช่วยเริ่มต้น
 // รับเฉพาะคีย์ที่รู้จัก ชนิดถูกต้อง — ค่าอื่นตัดทิ้ง (meta ไม่ใช่ object ธรรมดา = ลบทั้งก้อน)
@@ -230,10 +248,88 @@ function quietParts(base, mine, theirs) {
   return [m, t];
 }
 
+// ---------- รวมตาราง/คาบล็อกรายช่อง ----------
+const slotKey = (x) => x.day + '|' + x.period;
+const plKey = (x) => x.assignmentId + '|' + slotKey(x);
+const lockKey = (x) => (x.classId == null ? '*' : x.classId) + '|' + slotKey(x);
+/** อาร์เรย์ของ object ที่คีย์ไม่ซ้ำ → Map (คีย์ซ้ำ/รายการเสีย = null ให้ไปใช้วิธีเทียบทั้งหมวดแบบเดิม) */
+function keyMap(list, keyFn) {
+  if (!Array.isArray(list)) return null;
+  const m = new Map();
+  for (const x of list) {
+    if (!x || typeof x !== 'object') return null;
+    const k = keyFn(x);
+    if (m.has(k)) return null;
+    m.set(k, x);
+  }
+  return m;
+}
 /**
- * รวม 3 ทาง: รายการที่มี id (ห้อง ครู วิชา ห้องพิเศษ การสอน) เทียบทีละรายการ ส่วนอื่น (โครงคาบ คาบล็อก ตาราง) เทียบทั้งหมวด
+ * รวมเซ็ตของช่องแบบ 3 ทาง (ใช้เมื่อทั้งสองฝั่งแก้หมวดนี้): จัดกลุ่มตาม groupFn (ตาราง = การสอน, คาบล็อก = ช่อง)
+ * กลุ่มที่แก้ฝั่งเดียว = เอาฝั่งนั้น · ทั้งสองฝั่งแก้กลุ่มเดียวกันต่างกัน = ชน (prefer ตัดสินเฉพาะกลุ่มนั้น, null = เก็บทั้งสองฝั่ง)
+ * คืน { list, clash, added: Map(รายการ → 'm'|'t') } หรือ null ถ้าข้อมูลมีคีย์ซ้ำ (ให้ใช้แบบเดิม)
+ */
+function mergeSlots(b, m, t, keyFn, groupFn, prefer) {
+  const B = keyMap(b, keyFn), M = keyMap(m, keyFn), T = keyMap(t, keyFn);
+  if (!B || !M || !T) return null;
+  const J = (x) => JSON.stringify(x);
+  const changed = (X) => {
+    const g = new Set();
+    for (const [k, x] of X) if (!B.has(k) || J(B.get(k)) !== J(x)) g.add(groupFn(x));
+    for (const [k, x] of B) if (!X.has(k)) g.add(groupFn(x));
+    return g;
+  };
+  const cm = changed(M), ct = changed(T);
+  const sig = (X, g) => J([...X].filter(([, x]) => groupFn(x) === g).sort((p, q) => (p[0] < q[0] ? -1 : p[0] > q[0] ? 1 : 0)));
+  const side = new Map();   // กลุ่ม → 'm' | 't' | 'both'
+  let clash = false;
+  for (const g of cm) {
+    if (!ct.has(g)) side.set(g, 'm');
+    else if (sig(M, g) !== sig(T, g)) { clash = true; side.set(g, prefer === 'theirs' ? 't' : prefer === 'mine' ? 'm' : 'both'); }
+  }
+  for (const g of ct) if (!side.has(g)) side.set(g, 't');
+  const list = [], added = new Map(), seen = new Set();
+  const take = (x, k, from) => {
+    if (seen.has(k)) return;
+    seen.add(k); list.push(x);
+    if (!B.has(k)) added.set(x, from);
+  };
+  for (const [k, x] of T) { const s = side.get(groupFn(x)) || 't'; if (s !== 'm') take(x, k, 't'); }
+  for (const [k, x] of M) { const s = side.get(groupFn(x)); if (s === 'm' || s === 'both') take(x, k, 'm'); }
+  return { list, clash, added };
+}
+
+/**
+ * ตัดคาบที่วางไว้ให้ถูกโควตา (แก้ในอาร์เรย์เดิม): คาบกำพร้า (การสอนถูกลบ) และคาบเกิน perWeek ต่อการสอน
+ * เก็บคาบปักหมุดก่อน แล้วตามลำดับในอาร์เรย์ · การสอนที่ไม่มี perWeek เป็นตัวเลข = ไม่จำกัด · คืนจำนวนที่ตัด
+ */
+export function trimPlacements(doc) {
+  if (!doc || !Array.isArray(doc.placements) || !Array.isArray(doc.assignments)) return 0;
+  const cap = new Map();
+  for (const a of doc.assignments) if (a && typeof a === 'object') cap.set(a.id, typeof a.perWeek === 'number' ? a.perWeek : Infinity);
+  const list = doc.placements, used = new Map(), keep = new Uint8Array(list.length);
+  const pinned = (p) => p.pinned === true || p.pinned === 1 || p.pinned === '1';
+  for (const pass of [true, false]) {
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (!p || typeof p !== 'object' || pinned(p) !== pass || !cap.has(p.assignmentId)) continue;
+      const n = used.get(p.assignmentId) || 0;
+      if (n < cap.get(p.assignmentId)) { used.set(p.assignmentId, n + 1); keep[i] = 1; }
+    }
+  }
+  let cut = 0;
+  for (let i = list.length - 1; i >= 0; i--) if (!keep[i]) { list.splice(i, 1); cut++; }
+  return cut;
+}
+
+/**
+ * รวม 3 ทาง: รายการที่มี id (ห้อง ครู วิชา ห้องพิเศษ การสอน) เทียบทีละรายการ · ตาราง (placements) และคาบล็อก (locks) เทียบรายช่อง
+ * ส่วนอื่น (โครงคาบ ค่าตั้ง) เทียบทั้งหมวด
  * แก้ฝั่งเดียว = เอาฝั่งนั้น (รวมการเพิ่ม/ลบ) · แก้ทั้งสองฝั่งต่างกัน = ชน → prefer ('mine'|'theirs') ตัดสิน, null = ยังไม่ตัดสิน (นับไว้ถาม)
- * คืน { merged, clashes: [ชื่อหมวดที่ชน] }
+ * ตาราง: สองฝั่งวางคาบของ "การสอนต่างกัน" ที่ไม่ชนกัน = รวมทั้งคู่ ไม่ถาม · แก้คาบของการสอนเดียวกันทั้งสองฝั่งต่างกัน = ชน
+ *   · คาบที่เพิ่มคนละฝั่งแล้วชนห้องเรียน/ครู/ห้องพิเศษในช่องเดียวกัน = ชน (prefer ตัดสินเฉพาะคาบที่ชน)
+ *   · ท้ายสุดตัดคาบกำพร้า/เกิน perWeek ด้วย trimPlacements (หมุดก่อน)
+ * คืน { merged, clashes: [ชื่อหมวดที่ชน] } · ไม่แก้ object ของผู้เรียก
  */
 export function merge3(base, mine, theirs, prefer = null) {
   const J = (x) => JSON.stringify(x);
@@ -246,13 +342,53 @@ export function merge3(base, mine, theirs, prefer = null) {
     clashes.add(k);
     return prefer === 'theirs' ? t : m;
   };
+  const slotParts = { placements: [plKey, (x) => String(x.assignmentId)], locks: [lockKey, lockKey] };
+  const deferred = [];
   for (const k of new Set([...Object.keys(mine || {}), ...Object.keys(theirs || {})])) {
     const b = base?.[k], m = mine?.[k], t = theirs?.[k];
+    if (slotParts[k] && Array.isArray(b) && Array.isArray(m) && Array.isArray(t)) { deferred.push(k); continue; }
     if (byId(m) && byId(t) && (b === undefined || byId(b))) {
       const B = new Map((b || []).map((x) => [x.id, x])), M = new Map(m.map((x) => [x.id, x])), T = new Map(t.map((x) => [x.id, x]));
       const ids = [...t.map((x) => x.id), ...m.map((x) => x.id).filter((id) => !T.has(id))];
       out[k] = ids.map((id) => pick(k, B.get(id), M.get(id), T.get(id))).filter(Boolean);
     } else out[k] = pick(k, b, m, t);
+  }
+  // ตาราง/คาบล็อก ทำหลังสุด (ต้องใช้ assignments ที่รวมแล้วหาห้อง/ครู/ห้องพิเศษ)
+  for (const k of deferred) {
+    const b = base[k], m = mine[k], t = theirs[k];
+    const bj = J(b), mj = J(m), tj = J(t);
+    if (mj === tj || mj === bj) { out[k] = t; continue; }
+    if (tj === bj) { out[k] = m; continue; }
+    const r = mergeSlots(b, m, t, slotParts[k][0], slotParts[k][1], prefer);
+    if (!r) { out[k] = pick(k, b, m, t); continue; }
+    if (r.clash) clashes.add(k);
+    let list = r.list;
+    if (k === 'placements' && r.added.size) {
+      // คาบที่เพิ่มคนละฝั่ง ชนทรัพยากรเดียวกันในช่องเดียวกัน (คนละการสอน)
+      const asg = new Map((Array.isArray(out.assignments) ? out.assignments : []).filter((a) => a && typeof a === 'object').map((a) => [a.id, a]));
+      const res = (p) => { const a = asg.get(p.assignmentId); return a ? [a.classId && 'c' + a.classId, a.teacherId && 't' + a.teacherId, a.roomId && 'r' + a.roomId].filter(Boolean) : []; };
+      const owner = new Map();   // ทรัพยากร|ช่อง → [คาบที่เพิ่ม]
+      for (const [p, from] of r.added) for (const x of res(p)) {
+        const key = x + '|' + slotKey(p);
+        if (!owner.has(key)) owner.set(key, []);
+        owner.get(key).push([p, from]);
+      }
+      const drop = new Set();
+      for (const arr of owner.values()) {
+        const sides = new Set(arr.map(([, f]) => f));
+        if (sides.size < 2 || new Set(arr.map(([p]) => p.assignmentId)).size < 2) continue;
+        clashes.add(k);
+        if (prefer === 'mine') for (const [p, f] of arr) { if (f === 't') drop.add(p); }
+        else if (prefer === 'theirs') for (const [p, f] of arr) { if (f === 'm') drop.add(p); }
+      }
+      if (drop.size) list = list.filter((p) => !drop.has(p));
+    }
+    out[k] = list;
+  }
+  // ตัดคาบกำพร้า/เกินโควตา (สำเนาอาร์เรย์ก่อน — ห้ามแก้เอกสารของผู้เรียก)
+  if (Array.isArray(out.placements) && Array.isArray(out.assignments)) {
+    const doc = { placements: out.placements.slice(), assignments: out.assignments };
+    if (trimPlacements(doc)) out.placements = doc.placements;
   }
   return { merged: out, clashes: [...clashes] };
 }

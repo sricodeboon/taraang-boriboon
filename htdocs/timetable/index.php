@@ -209,10 +209,16 @@ page_head('ตารางบริบูรณ์ · จัดตาราง�
     .sister { align-items:flex-start; }
   }
   @media (max-width:380px) { .cta-btns { grid-template-columns:minmax(0,1fr); } }
+  /* ส่วนล่างไหลเข้าเมื่อเลื่อนถึง (home.js ติด .reveal ให้เฉพาะสิ่งที่ยังอยู่ใต้จอ → ไม่มี JS = เห็นครบตั้งแต่แรก ไม่กระทบ LCP) */
+  .reveal:not(.is-in) { opacity:0; }
+  .reveal.is-in { animation:m-in var(--d-4) var(--e-out) both; animation-delay:calc(var(--i, 0) * 70ms * var(--m, 1)); }
+  @media print { .reveal { opacity:1 !important; animation:none !important; } }
   @media (prefers-reduced-motion:reduce) {
-    .hero *, .hero, .sky::before { animation:none !important; }
+    /* รวม pseudo-element: เงาใต้ครูบูรณ์ (.boon::after) และดาวบนฟ้า ต้องหยุดด้วย (เดิมยังวิ่งอยู่ — บั๊ก H) */
+    .hero *, .hero, .sky::before, .hero *::before, .hero *::after, .boon::after { animation:none !important; }
     .shot { transform:none; }
   }
+  html.tt-still .boon::after { animation:none !important; }
 </style>', DEFAULT_DESC, []);
 ?>
 <section class="hero" aria-labelledby="hero-h">
@@ -346,20 +352,5 @@ page_head('ตารางบริบูรณ์ · จัดตาราง�
     <p><?= footer_links_html('#donate', '#feedback') ?></p>
   </div>
 </footer>
-<script type="module" nonce="<?= csp_nonce() ?>">
-// ตัวเลขโรงเรียนนับขึ้นเบา ๆ ครั้งเดียว (ไม่เล่นเมื่อลดภาพเคลื่อนไหว/กดหยุดภาพเคลื่อนไหว) · ไม่มี JS = เห็นตัวเลขจริงตั้งแต่แรก
-const b = document.querySelector('.stat b[data-count]');
-const n = Number(b?.dataset.count) || 0;
-if (b && n > 1 && !matchMedia('(prefers-reduced-motion: reduce)').matches && !document.documentElement.classList.contains('tt-still')) {
-  const fmt = new Intl.NumberFormat('th-TH');
-  const t0 = performance.now();
-  const step = (t) => {
-    const k = Math.min(1, (t - t0) / 900);
-    b.textContent = fmt.format(Math.round(n * (1 - (1 - k) ** 3)));
-    if (k < 1) requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-}
-</script>
 <?= flash_script($msg, $msgKind) ?>
 <?php page_foot();

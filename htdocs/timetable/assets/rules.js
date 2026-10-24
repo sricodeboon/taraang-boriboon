@@ -360,17 +360,24 @@ function otherTeacher(doc, a, perWeek) {
 
 /**
  * แบ่งสอน: แยกแถว a เป็น 2 แถวที่ผูกกัน (split = id กลุ่ม) คาบรวมเท่าเดิม (5 → 3+2)
- * คาบที่วางไว้แล้วอยู่กับแถวเดิม ส่วนที่เกินคาบใหม่ของแถวเดิมถูกนำออก · คืนแถวใหม่
+ * คาบที่วางไว้แล้วอยู่กับแถวเดิม ส่วนที่เกินคาบใหม่ของแถวเดิมถูกนำออก (เก็บคาบปักหมุดไว้ก่อน) · คืนแถวใหม่
+ * perWeek < 2 แบ่งไม่ได้ (คาบรวมต้องเท่าเดิม) → คืน null และไม่แก้เอกสาร
  */
 export function splitAssignment(doc, a, newId) {
-  const n = Math.max(1, a.perWeek || 1);
+  const n = Math.floor(Number(a.perWeek) || 0);
+  if (n < 2) return null;
   const group = a.split || a.id;
-  const keep = Math.ceil(n / 2), give = n >= 2 ? n - keep : 1;
+  const keep = Math.ceil(n / 2), give = n - keep;
   a.split = group;
   a.perWeek = keep;
   if ((a.doubles || 0) * 2 > keep) a.doubles = Math.floor(keep / 2);
+  const pinned = (p) => p.pinned === true || p.pinned === 1 || p.pinned === '1';
   const mine = doc.placements.filter((p) => p.assignmentId === a.id);
-  if (mine.length > keep) { const drop = new Set(mine.slice(keep)); doc.placements = doc.placements.filter((p) => !drop.has(p)); }
+  if (mine.length > keep) {
+    const order = [...mine.filter(pinned), ...mine.filter((p) => !pinned(p))];   // stable: หมุดก่อน ตามลำดับเดิม
+    const drop = new Set(order.slice(keep));
+    doc.placements = doc.placements.filter((p) => !drop.has(p));
+  }
   const b = { id: newId, subjectId: a.subjectId, classId: a.classId, teacherId: otherTeacher(doc, a, give),roomId: a.roomId ?? null, perWeek: give, doubles: 0, split: group };
   doc.assignments.splice(doc.assignments.indexOf(a) + 1, 0, b);
   return b;

@@ -44,7 +44,9 @@ export function load() {
       confirmButtonText: 'ตกลง', cancelButtonText: 'ยกเลิก', denyButtonText: 'ไม่',
       buttonsStyling: false, reverseButtons: true,
       customClass: { popup: 'tt-swal', confirmButton: 'btn btn-swal-ok', cancelButton: 'btn', denyButton: 'btn btn-swal-deny', input: 'input', validationMessage: 'tt-swal-valid' },
-      showClass: { popup: 'swal2-show', backdrop: 'swal2-backdrop-show', icon: 'swal2-icon-show' },
+      // แอนิเมชันของเราเอง (app.css: tt-modal-in/out · ตัวคูณ --m ของ motion.css → ลดภาพเคลื่อนไหว = จบทันที)
+      showClass: { popup: 'swal2-show tt-modal-in', backdrop: 'swal2-backdrop-show', icon: 'swal2-icon-show' },
+      hideClass: { popup: 'swal2-hide tt-modal-out', backdrop: 'swal2-backdrop-hide', icon: 'swal2-icon-hide' },
     });
     return Swal;
   }).catch((e) => { failed = true; console.warn('โหลด SweetAlert2 ไม่ได้ ใช้กล่องแจ้งเตือนสำรอง', e.message); return null; });
@@ -84,6 +86,8 @@ function fireToast(S, { msg, kind, ms, prio, html, confirm, onOpen }) {
     toast: true, position: wide() ? 'bottom' : 'bottom-end', icon: ICON[kind], titleText: html ? undefined : String(msg), html, // titleText = ข้อความล้วน (title ของ Swal เป็น HTML → ห้ามใช้กับชื่อที่ผู้ใช้กรอก)
     showConfirmButton: !!confirm, confirmButtonText: confirm, timer: ms, timerProgressBar: kind === 'action',
     customClass: { popup: 'tt-swal tt-toast tt-' + kind, confirmButton: 'btn btn-sm btn-swal-ok' },
+    showClass: { popup: 'swal2-show tt-toast-in', backdrop: 'swal2-backdrop-show', icon: 'swal2-icon-show' },
+    hideClass: { popup: 'swal2-hide tt-toast-out', backdrop: 'swal2-backdrop-hide', icon: 'swal2-icon-hide' },
     didOpen: (el) => {
       el.addEventListener('mouseenter', S.stopTimer); el.addEventListener('mouseleave', S.resumeTimer);
       if (kind === 'loading') S.showLoading();
@@ -141,6 +145,50 @@ export function loading(msg) {
       else if (failed) hideFallbackToast();
     },
   };
+}
+
+// ---------- ปุ่มกำลังทำงาน → เสร็จ (DELIGHT §3.2) ----------
+const doneTimers = new WeakMap();
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+/**
+ * busy(ปุ่ม, fn, { label, done, min, keep }) — ระหว่าง fn ทำงาน: ปุ่ม disabled (กันกดซ้ำ) + .btn-busy วงหมุน + ข้อความ label
+ * ความกว้างปุ่มล็อกไว้เท่าเดิม (ไม่ดันของข้าง ๆ) · min = เวลาขั้นต่ำ (มิลลิวินาที) ให้รู้ว่ากำลังคิด
+ * สำเร็จ → .btn-done เช็ก + ข้อความ done 1.2 วิ แล้วคืนข้อความเดิม · พลาด → คืนทันทีแล้วโยน error ต่อ
+ * กดซ้ำระหว่าง busy → คืน undefined ไม่เรียก fn · ปุ่มถูกวาดใหม่ระหว่างทาง (หลุดจากหน้า) ก็ไม่พัง
+ */
+export async function busy(btn, fn, { label = 'กำลังเตรียม', done = 'เสร็จแล้ว', min = 0 } = {}) {
+  if (!btn) return fn();
+  if (btn.classList.contains('btn-busy')) return undefined;
+  const prev = doneTimers.get(btn);
+  if (prev) { clearTimeout(prev.t); prev.restore(); }
+  const html = btn.innerHTML, width = btn.style.width, wasDisabled = btn.disabled;
+  const restore = () => {
+    doneTimers.delete(btn);
+    btn.classList.remove('btn-busy', 'btn-done');
+    btn.innerHTML = html; btn.style.width = width; btn.disabled = wasDisabled;
+    btn.removeAttribute('aria-busy');
+  };
+  const w = btn.getBoundingClientRect().width;
+  if (w) btn.style.width = w + 'px';
+  btn.classList.add('btn-busy');
+  btn.setAttribute('aria-busy', 'true');
+  btn.disabled = true;
+  btn.textContent = label;
+  const t0 = Date.now();
+  let out;
+  try {
+    out = await fn();
+    const rest = min - (Date.now() - t0);
+    if (rest > 0) await wait(rest);
+  } catch (e) { restore(); throw e; }
+  btn.classList.remove('btn-busy');
+  btn.removeAttribute('aria-busy');
+  btn.disabled = wasDisabled;
+  btn.classList.add('btn-done');
+  btn.textContent = done;
+  const rec = { restore, t: setTimeout(restore, 1200) };
+  doneTimers.set(btn, rec);
+  return out;
 }
 
 // ---------- กล่องโต้ตอบ ----------
