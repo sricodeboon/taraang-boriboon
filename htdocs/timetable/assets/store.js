@@ -1,5 +1,5 @@
 // สถานะกลางของเอกสารภาคเรียน + ตัวช่วยค้นหา + ตรวจชน (สำรอง ถ้า solver.js ยังไม่พร้อม)
-import { DAY_NAMES, fillSubjectPerWeek } from './rules.js';
+import { DAY_NAMES, fillSubjectPerWeek, SUBJECT_GROUP_CODES } from './rules.js';
 export { DAY_NAMES };
 export const SUBJECT_COLORS = ['#7FB0E8', '#E3B85A', '#F0A6BD', '#B69CE0', '#F2A65A', '#5FB3C9', '#E07A7A', '#9DB4C0', '#D4A5E8', '#C9B27C', '#8EA6E0', '#E8A0A0'];
 
@@ -49,11 +49,19 @@ function sanitize(d) {
     if (!Array.isArray(d[k])) d[k] = [];
     clean(d[k]);
   }
+  const classIds = new Set(d.classes.map((c) => c.id));
   for (const t of d.teachers) {
     if (t.maxPerDay != null) t.maxPerDay = Math.max(0, toInt(t.maxPerDay));
     if (t.unavailable != null && !(Array.isArray(t.unavailable) && t.unavailable.every((u) => Array.isArray(u) && Number.isInteger(u[0]) && Number.isInteger(u[1])))) {
       t.unavailable = Array.isArray(t.unavailable) ? t.unavailable.filter(Array.isArray).map(([x, y]) => [toInt(x), toInt(y)]) : [];
     }
+    // กลุ่มสาระที่สอนได้ (ฟิลด์ใหม่ optional) — เฉพาะรหัสใน whitelist ไม่ซ้ำ
+    if (t.subjects != null) {
+      if (!Array.isArray(t.subjects)) delete t.subjects;
+      else if (!t.subjects.every((g, i, a) => SUBJECT_GROUP_CODES.includes(g) && a.indexOf(g) === i)) t.subjects = [...new Set(t.subjects.filter((g) => SUBJECT_GROUP_CODES.includes(g)))]; // ถูกอยู่แล้ว = อาร์เรย์เดิม (sanitize รันทุก commit)
+    }
+    // ครูประจำชั้น (optional) — id ห้องที่มีอยู่จริงเท่านั้น (ลบห้องแล้วค่านี้หายเอง)
+    if (t.homeroom != null && !(typeof t.homeroom === 'string' && classIds.has(t.homeroom))) delete t.homeroom;
   }
   for (const s of d.subjects) {
     if (s.color != null && !HEX.test(String(s.color))) s.color = SUBJECT_COLORS[0];
@@ -70,7 +78,39 @@ function sanitize(d) {
   // ค่าตั้งของภาคเรียน (แนวตาราง) — ข้อมูลเก่าไม่มี = วันเรียงลงล่าง
   if (!d.settings || typeof d.settings !== 'object' || Array.isArray(d.settings)) d.settings = {};
   if (d.settings.orientation !== 'periods' && d.settings.orientation !== 'days') d.settings.orientation = 'days';
+  // seed ของการจัดอัตโนมัติ (ผลเหมือนเดิมทุกครั้งจนกว่าจะกด "สุ่มแบบใหม่") — จำนวนเต็มเท่านั้น
+  if (d.settings.solveSeed != null) { const n = Math.trunc(Number(d.settings.solveSeed)); if (Number.isSafeInteger(n)) d.settings.solveSeed = n; else delete d.settings.solveSeed; }
+  sanitizeMeta(d);
   for (const x of [...d.locks, ...d.placements]) { x.day = toInt(x.day); x.period = toInt(x.period); }
+}
+
+// ข้อมูลประกอบของภาคเรียน (ไม่ใช่ข้อมูลตาราง): meta.lastSolve = ผลจัดล่าสุด (แอดมินอ่าน) · meta.setup = คำตอบตัวช่วยเริ่มต้น
+// รับเฉพาะคีย์ที่รู้จัก ชนิดถูกต้อง — ค่าอื่นตัดทิ้ง (meta ไม่ใช่ object ธรรมดา = ลบทั้งก้อน)
+const plain = (o) => !!o && typeof o === 'object' && !Array.isArray(o) && [Object.prototype, null].includes(Object.getPrototypeOf(o));
+const SAFE_KEY = /^[A-Za-z_][\w-]{0,39}$/;
+const natural = (v) => { const n = toInt(v, -1); return n >= 0 ? n : 0; };
+function sanitizeMeta(d) {
+  if (d.meta == null) return;
+  if (!plain(d.meta)) { delete d.meta; return; }
+  const m = d.meta, out = {};
+  const ls = m.lastSolve;
+  if (plain(ls)) {
+    const at = typeof ls.at === 'number' && Number.isFinite(ls.at) ? Math.trunc(ls.at) : typeof ls.at === 'string' && /^[\d\-T:.Z+ ]{4,40}$/.test(ls.at) ? ls.at : null;
+    out.lastSolve = { at, mode: typeof ls.mode === 'string' && /^[\w-]{1,20}$/.test(ls.mode) ? ls.mode : '', placed: natural(ls.placed), need: natural(ls.need), unplaced: natural(ls.unplaced),
+      codes: Array.isArray(ls.codes) ? ls.codes.filter((c) => typeof c === 'string' && /^[\w.-]{1,40}$/.test(c)).slice(0, 50) : [] };
+  }
+  // setup: คีย์ปลอดภัย + ค่าพื้นฐาน (ข้อความ ≤ 200 ตัว · ตัวเลข · จริง/เท็จ · อาร์เรย์ของค่าพื้นฐาน ≤ 50)
+  if (plain(m.setup)) {
+    const prim = (v) => (typeof v === 'string' ? v.length <= 200 : typeof v === 'number' ? Number.isFinite(v) : typeof v === 'boolean');
+    out.setup = {};
+    for (const [k, v] of Object.entries(m.setup)) {
+      if (!SAFE_KEY.test(k)) continue;
+      if (prim(v)) out.setup[k] = v;
+      else if (Array.isArray(v) && v.length <= 50 && v.every(prim)) out.setup[k] = v.slice();
+    }
+  }
+  for (const k of Object.keys(m)) delete m[k];
+  Object.assign(m, out);
 }
 
 export const remaining = (a) => Math.max(0, (a.perWeek || 0) - (idx.placed.get(a.id) || 0));
@@ -96,6 +136,9 @@ export function placementsAt(view, id, day, period) {
   });
 }
 
+/** แถวที่ยังไม่มีครู: ว่าง หรืออ้างครูที่ถูกลบไปแล้ว (รวมการแก้ไข 409/เลิกทำนำเข้า) — ใช้นิยามเดียวกันทุกที่ ตรงกับ solverInput */
+export const noTeacher = (a) => !a.teacherId || !idx.tch.has(a.teacherId);
+
 /** เหตุผลที่วางไม่ได้ (hard constraints) หรือ null ถ้าวางได้ — ใช้ตอนลาก */
 export function whyCannotPlace(a, day, period, ignore = null) {
   if (isBreak(period)) return 'ช่องพัก';
@@ -107,10 +150,12 @@ export function whyCannotPlace(a, day, period, ignore = null) {
     if (p === ignore) continue;
     const b = idx.asg.get(p.assignmentId);
     if (!b) continue;
-    if (p.day === day && b.teacherId === a.teacherId) teacherToday++;
+    // แถวที่ยังไม่มีครู (teacherId ว่าง) ไม่นับว่าเป็นครูคนเดียวกัน — ตรงกับ localValidate
+    const sameTeacher = !!a.teacherId && b.teacherId === a.teacherId;
+    if (p.day === day && sameTeacher) teacherToday++;
     if (p.day !== day || p.period !== period) continue;
     if (b.classId === a.classId) return 'ห้องเรียนนี้มีวิชาอื่นแล้ว';
-    if (b.teacherId === a.teacherId) return 'ครูสอนห้องอื่นอยู่';
+    if (sameTeacher) return 'ครูสอนห้องอื่นอยู่';
     if (a.roomId && b.roomId === a.roomId) return 'ห้องพิเศษถูกใช้อยู่';
   }
   const t = idx.tch.get(a.teacherId);
@@ -162,6 +207,30 @@ export function assignmentLabel(a) {
 // ---------- รวมการแก้ไขเมื่อบันทึกชนกัน (409) / กู้ฉบับร่าง — ใช้ใน app.js และทดสอบใน tests/merge.test.mjs ----------
 const byId = (arr) => Array.isArray(arr) && arr.every((x) => x && typeof x === 'object' && typeof x.id === 'string');
 /**
+ * ส่วนที่เปลี่ยนทุกครั้งที่กดจัด แต่ไม่ควรถามผู้ใช้ → ทำให้สองฝั่งเท่ากันก่อนรวม (สำเนาตื้น ไม่แก้ของเดิม)
+ * meta = บันทึกประกอบ: lastSolve เอาฉบับที่ at ใหม่กว่า, ส่วนอื่น (setup) รวมแบบ spread ฝั่งเราชนะ
+ * settings ต่างกันแค่ solveSeed → ใช้ seed ของอีกฝั่ง (seed ไม่ใช่ข้อมูลที่ครูตั้งเอง)
+ */
+function quietParts(base, mine, theirs) {
+  if (!mine || !theirs || typeof mine !== 'object' || typeof theirs !== 'object') return [mine, theirs];
+  const plainObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+  const m = { ...mine }, t = { ...theirs };
+  if ((plainObj(m.meta) || plainObj(t.meta)) && JSON.stringify(m.meta) !== JSON.stringify(t.meta)) {
+    const mm = plainObj(m.meta) ? m.meta : {}, tm = plainObj(t.meta) ? t.meta : {};
+    const at = (x) => (plainObj(x) && typeof x.at === 'string' ? x.at : '');
+    const ls = at(mm.lastSolve) >= at(tm.lastSolve) ? mm.lastSolve : tm.lastSolve;
+    const meta = { ...tm, ...mm };
+    if (ls === undefined) delete meta.lastSolve; else meta.lastSolve = ls;
+    m.meta = meta; t.meta = meta;
+  }
+  if (plainObj(m.settings) && plainObj(t.settings) && m.settings.solveSeed !== t.settings.solveSeed) {
+    const { solveSeed: a, ...ms } = m.settings, { solveSeed: b, ...ts } = t.settings;
+    if (JSON.stringify(ms) === JSON.stringify(ts)) m.settings = t.settings;
+  }
+  return [m, t];
+}
+
+/**
  * รวม 3 ทาง: รายการที่มี id (ห้อง ครู วิชา ห้องพิเศษ การสอน) เทียบทีละรายการ ส่วนอื่น (โครงคาบ คาบล็อก ตาราง) เทียบทั้งหมวด
  * แก้ฝั่งเดียว = เอาฝั่งนั้น (รวมการเพิ่ม/ลบ) · แก้ทั้งสองฝั่งต่างกัน = ชน → prefer ('mine'|'theirs') ตัดสิน, null = ยังไม่ตัดสิน (นับไว้ถาม)
  * คืน { merged, clashes: [ชื่อหมวดที่ชน] }
@@ -169,6 +238,7 @@ const byId = (arr) => Array.isArray(arr) && arr.every((x) => x && typeof x === '
 export function merge3(base, mine, theirs, prefer = null) {
   const J = (x) => JSON.stringify(x);
   const out = {}, clashes = new Set();
+  [mine, theirs] = quietParts(base, mine, theirs);
   const pick = (k, b, m, t) => {
     const bj = J(b), mj = J(m), tj = J(t);
     if (mj === tj || mj === bj) return t;

@@ -4,7 +4,9 @@
 .bar-school { display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
 .bar-school b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .school-logo { width:28px; height:28px; object-fit:contain; border-radius:6px; flex:none; }
-.bar-user { display:flex; gap:8px; }
+.bar-user { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+/* ป้ายข้อเสนอแนะใหม่บนปุ่มผู้ดูแล (กฎเดียวกับ admin.css) */
+.nbadge { display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 6px; margin-left:6px; border-radius:999px; background:var(--gold-bg); color:#0F2438; font-family:var(--mono); font-size:.72rem; font-weight:600; font-variant-numeric:tabular-nums; }
 /* ปุ่มบนแถบหัว (สถานะบันทึก คู่มือ ออกจากระบบ) เป็นกรอบเหลี่ยมตามที่ครูแจ็กเลือก */
 .bar #save-state, .bar-user .btn { border-radius:6px; }
 .input-sm { padding:5px 10px; width:auto; max-width:260px; }
@@ -12,6 +14,8 @@
 .tabs button { border:0; background:none; padding:11px 14px; cursor:pointer; color:var(--muted); border-bottom:2px solid transparent; font-weight:500; white-space:nowrap; }
 .tabs button[aria-selected="true"] { color:var(--ink); border-bottom-color:var(--gold-bg); }
 main { flex:1; }
+/* ก่อนโหลดภาคเรียนเสร็จ: ซ่อน <main> ไว้ (จองที่) แถบขั้นตอน + ครูบูรณ์ที่แทรกเหนือ main ตอนโหลดเสร็จจึงไม่นับเป็น layout shift · app.js ใส่ .tt-ready */
+.app:not(.tt-ready) > main { visibility:hidden; }
 .tab { padding:16px; }
 
 /* ---------- บอร์ด ---------- */
@@ -27,9 +31,11 @@ main { flex:1; }
 .palette { position:sticky; top:118px; max-height:calc(100vh - 140px); overflow:auto; padding:12px; display:grid; gap:8px; }
 .palette h3 { font-size:.95rem; }
 .palette .empty { font-size:.88rem; color:var(--muted); }
-.chip { --c:#7FB0E8; display:grid; grid-template-columns:6px 1fr auto; gap:8px; align-items:center; padding:7px 9px; border:1px solid var(--line);
-        border-radius:9px; background:var(--surface); cursor:grab; user-select:none; touch-action:none; }
-.chip::before { content:""; align-self:stretch; border-radius:3px; background:var(--c); }
+.chip { --c:#7FB0E8; display:grid; grid-template-columns:10px 1fr auto; gap:8px; align-items:center; padding:7px 9px;
+        border:1px solid color-mix(in srgb, var(--c) 40%, var(--line)); border-radius:9px; background:color-mix(in srgb, var(--c) 8%, var(--surface));
+        cursor:grab; user-select:none; touch-action:none; }
+/* สีวิชา = จุดกลมหน้าชื่อ + พื้นอ่อน/ขอบรอบ (ห้ามแถบขอบซ้าย) */
+.chip::before { content:""; width:10px; height:10px; border-radius:50%; background:var(--c); }
 .chip .t { display:grid; line-height:1.3; min-width:0; }
 .chip .t b { font-size:.9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .chip .t span { font-size:.78rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -53,9 +59,8 @@ main { flex:1; }
 .tt td.drop-ok { outline:2px dashed var(--blue); outline-offset:-3px; background:var(--blue-soft); }
 .tt td.drop-bad { outline:2px dashed var(--danger); outline-offset:-3px; background:var(--danger-soft); }
 .tt td.over { outline-style:solid; }
-.cell { --c:#7FB0E8; position:relative; height:100%; min-height:58px; border-radius:7px; padding:5px 7px 5px 10px; background:color-mix(in srgb, var(--c) 16%, var(--surface));
+.cell { --c:#7FB0E8; position:relative; height:100%; min-height:58px; border-radius:7px; padding:5px 7px; background:color-mix(in srgb, var(--c) 16%, var(--surface));
         border:1px solid color-mix(in srgb, var(--c) 45%, var(--line)); cursor:grab; display:grid; align-content:start; line-height:1.3; overflow:hidden; touch-action:none; }
-.cell::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--c); }
 .cell b { font-size:.86rem; }
 .cell span { font-size:.76rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cell .pin { position:absolute; right:4px; top:3px; font-size:.75rem; }
@@ -65,10 +70,17 @@ main { flex:1; }
 .cell-menu { position:absolute; z-index:40; min-width:190px; padding:6px; display:grid; gap:2px; }
 .cell-menu button { text-align:left; border:0; background:none; padding:8px 10px; border-radius:7px; cursor:pointer; }
 .cell-menu button:hover { background:var(--surface-2); }
-/* กล่องบอกขั้นต่อไป / ผลการจัดอัตโนมัติ (อยู่เหนือตาราง มือถือเห็นก่อนรายการวิชา) */
-.callout { padding:12px 14px; margin-bottom:12px; border-left:4px solid var(--blue); }
-.callout.go { border-left-color:var(--gold-bg); background:var(--gold-soft); }
-.callout.warn { border-left-color:var(--danger); }
+/* กล่องบอกขั้นต่อไป / ผลการจัดอัตโนมัติ (อยู่เหนือตาราง มือถือเห็นก่อนรายการวิชา)
+   สถานะบอกด้วยพื้นอ่อน + ขอบรอบ 1px + ไอคอนมุมซ้ายบน (ไม่ใช้แถบสีขอบซ้าย): พร้อม/สำเร็จ = น้ำเงิน · ต้องตรวจ = ทอง */
+.callout { position:relative; padding:12px 14px 12px 44px; margin-bottom:12px; }
+.callout::before { content:""; position:absolute; left:14px; top:14px; width:20px; height:20px; background:var(--muted);
+  -webkit-mask:var(--ico) center/contain no-repeat; mask:var(--ico) center/contain no-repeat;
+  --ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-6h2zm0-8h-2V7h2z'/%3E%3C/svg%3E"); }
+.callout.go { background:var(--blue-soft); border-color:var(--blue); }
+.callout.go::before { background:var(--blue); --ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2a10 10 0 100 20 10 10 0 000-20zm-2 15-5-5 1.4-1.4 3.6 3.6 7.6-7.6L19 8z'/%3E%3C/svg%3E"); }
+.callout.warn { background:var(--gold-soft); border-color:#C8962E; }
+.callout.warn::before { background:#C8962E; --ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2 1 21h22zm1 15h-2v-2h2zm0-4h-2V9h2z'/%3E%3C/svg%3E"); }
+@media (max-width:560px) { .callout { padding-left:40px; } .callout::before { left:12px; } }
 .callout-head { display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
 .callout ul, .callout ol { margin:8px 0 0; padding-left:20px; display:grid; gap:8px; }
 .callout .fix { color:var(--gold); font-weight:500; }
@@ -143,7 +155,7 @@ main { flex:1; }
 .row-note .btn { padding:1px 10px; font-size:.8rem; }
 .pill.soft { color:var(--gold); border-color:#C8962E; background:var(--gold-soft); }
 .pill.split { color:var(--blue); border-color:var(--blue); background:var(--blue-soft); }
-.asg-table tr.split-row td:first-child { box-shadow:inset 3px 0 0 var(--blue); }
+.asg-table tr.split-row td { background:var(--blue-soft); } /* แถวแบ่งสอน: พื้นน้ำเงินอ่อนทั้งแถว (ไม่ใช้แถบขอบซ้าย) */
 .asg-table tr.dup-row td { background:var(--danger-soft); }
 .act-cell { white-space:nowrap; }
 .act-cell .btn + .btn { margin-left:4px; }
@@ -182,3 +194,73 @@ main { flex:1; }
 #tab-periods .table select.input { min-width:106px; }
 #tab-periods .table input[type="time"] { min-width:100px; }
 @media (max-width:900px) { #tab-periods .two-col { grid-template-columns:minmax(0,1fr); } }
+
+/* ---------- ครูบูรณ์ ผู้ช่วยในแอป (#boon · assets/mascot.js) ----------
+   inline = การ์ดเตี้ยใต้แถบขั้นตอน (สองชิ้นต่อกันเป็นแผงเดียว) · fab = ปุ่มกลมมุมขวาล่าง · sheet = มือถือกางการ์ดจากปุ่มกลม
+   ขยับได้เฉพาะ transform/opacity · ปิดเมื่อลดการเคลื่อนไหว (html.tt-still ปิดทั้งหน้าจาก layout.php) */
+.boon[data-mode="inline"] { background:var(--surface-2); border-bottom:1px solid var(--line); padding:6px 16px 10px; }
+.tt-steps:has(+ .boon[data-mode="inline"]) { border-bottom:0; }
+.tt-steps:has(+ .boon[data-mode="inline"][data-blank="1"]) > [data-open-wizard] { display:none; } /* ใช้ปุ่มของครูบูรณ์ปุ่มเดียว */
+.boon-card { position:relative; display:flex; align-items:center; gap:14px; min-height:88px; padding:8px 46px 8px 10px; border:1px solid var(--line); border-radius:14px; background:var(--surface); overflow:hidden; }
+.boon-card[data-tone="next"] { background:var(--gold-soft); border-color:color-mix(in srgb, var(--gold-bg) 70%, var(--line)); }
+.boon-card[data-tone="ok"], .boon-card[data-tone="busy"] { background:var(--blue-soft); border-color:color-mix(in srgb, var(--blue) 45%, var(--line)); }
+.boon-card[data-tone="warn"] { background:var(--danger-soft); border-color:color-mix(in srgb, var(--danger) 40%, var(--line)); }
+.boon-fig { position:relative; flex:none; width:92px; height:100px; margin:-8px 0 -8px -2px; align-self:flex-end; overflow:hidden; }
+.boon-fig img { position:absolute; left:0; top:4px; width:100%; height:auto; opacity:0; transform:translateY(8px);
+  transition:opacity .24s cubic-bezier(.2,.8,.2,1), transform .32s cubic-bezier(.2,.8,.2,1); animation:boon-float 6s ease-in-out infinite; }
+.boon-fig img.on { opacity:1; transform:none; transition-duration:.32s; }
+.boon-fig[data-bust="1"] { width:72px; height:72px; margin:0; align-self:center; border-radius:50%; background:var(--surface); border:1px solid var(--line); }
+.boon-fig[data-bust="1"] img { top:0; animation:none; }
+.boon-body { flex:1; min-width:0; display:grid; gap:6px; }
+.boon-msg { margin:0; line-height:1.55; }
+.boon-step { display:inline-block; padding:0 9px; border-radius:999px; background:var(--gold-bg); color:#0F2438; font-size:.78rem; font-weight:600; line-height:20px; vertical-align:1px; }
+.boon-acts { display:flex; flex-wrap:wrap; gap:6px; }
+.boon-prog { width:min(280px, 100%); }
+.boon-x { position:absolute; top:6px; right:6px; width:32px; height:32px; display:grid; place-items:center; border:0; border-radius:50%; background:none; color:var(--muted); cursor:pointer; }
+.boon-x:hover { background:var(--surface); color:var(--ink); }
+.boon-fab { display:none; position:fixed; right:16px; bottom:calc(16px + env(safe-area-inset-bottom, 0px)); z-index:45; width:56px; height:56px; padding:0; border:2px solid var(--gold-bg);
+  border-radius:50%; background:var(--surface); box-shadow:var(--shadow); cursor:pointer; overflow:visible; }
+.boon-fab img { display:block; width:100%; height:100%; border-radius:50%; object-fit:cover; }
+.boon-fab-txt { font-family:var(--display); font-weight:700; font-size:.82rem; color:var(--ink); }
+.boon-dot { position:absolute; top:-2px; right:-2px; width:14px; height:14px; border-radius:50%; background:var(--gold-bg); border:2px solid var(--surface); }
+.boon[data-mode="fab"] .boon-card { display:none; }
+.boon[data-mode="fab"] .boon-fab, .boon[data-mode="sheet"] .boon-fab { display:grid; place-items:center; }
+/* จอแคบ toast ของ Swal อยู่ล่างกลางเต็มกว้าง (notify.js) → ยกปุ่มครูบูรณ์ขึ้นพ้น toast ไม่ให้ถูกบังตอนมีปุ่ม "เลิกทำ" */
+@media (max-width:640px) { body.swal2-toast-shown .boon[data-mode="fab"] .boon-fab { bottom:calc(84px + env(safe-area-inset-bottom, 0px)); } }
+.boon[data-mode="sheet"] .boon-card { position:fixed; left:12px; right:12px; bottom:calc(84px + env(safe-area-inset-bottom, 0px)); z-index:46; box-shadow:var(--shadow); }
+.boon[data-mode="sheet"] .boon-fig[data-bust="1"] { width:44px; height:44px; }
+.boon-pop { animation:boon-pop .6s cubic-bezier(.2,.8,.2,1); }
+.boon-confetti { position:absolute; inset:0; pointer-events:none; overflow:hidden; border-radius:inherit; }
+.boon-confetti i { position:absolute; top:-12px; width:6px; height:10px; border-radius:2px; background:#E3B85A; opacity:0; animation:boon-fall 1.6s cubic-bezier(.2,.8,.2,1) forwards; }
+.boon-confetti i:nth-child(4n+2) { background:#7FB0E8; }
+.boon-confetti i:nth-child(4n+3) { background:#F0A6BD; width:8px; height:8px; border-radius:50%; }
+.boon-confetti i:nth-child(4n) { background:#C8962E; }
+.boon-confetti i:nth-child(3n) { animation-delay:.12s; }
+.boon-confetti i:nth-child(3n+1) { animation-delay:.26s; }
+@keyframes boon-float { 0%, 100% { translate:0 0; rotate:0deg; } 50% { translate:0 -4px; rotate:.6deg; } }
+@keyframes boon-pop { 0% { transform:scale(.9); } 60% { transform:scale(1.04); } 100% { transform:scale(1); } }
+@keyframes boon-fall { 0% { opacity:1; transform:translateY(0) rotate(0); } 100% { opacity:0; transform:translateY(130px) rotate(320deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .boon-fig img { animation:none; transform:none; transition:opacity .2s linear; }
+  .boon-pop { animation:none; }
+  .boon-confetti { display:none; }
+}
+
+/* แถวว่างในตารางข้อมูล: ครูบูรณ์ + ประโยคเดียว + ปุ่ม (จอแคบ ตารางกว้างกว่าจอ → ชิดซ้ายตามความกว้างจอ ไม่ตกขอบ) */
+.empty-row td { padding:26px 16px; }
+.boon-empty { display:grid; justify-items:center; gap:10px; max-width:460px; margin:0 auto; text-align:center; }
+.boon-empty p { margin:0; }
+.boon-empty .boon-bust { width:64px; height:64px; border-radius:50%; background:var(--gold-soft); border:1px solid var(--line); }
+.boon-empty-acts { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
+@media (max-width:760px) { .boon-empty { margin:0; width:calc(100vw - 66px); position:sticky; left:16px; } }
+
+/* ท้ายแท็บส่งออก: เลี้ยงโอวัลติน (ย่อ) + ข้อเสนอแนะ (ย่อ) — กล่องมาจาก lib/layout.php ย้ายเข้ามาโดย export.js */
+.tt-support { display:grid; grid-template-columns:104px minmax(0,1fr); gap:14px 18px; max-width:900px; margin:24px auto 0; }
+.tt-support > * { grid-column:2; }
+.tt-support > .tt-support-art { grid-column:1; grid-row:1 / span 2; width:104px; height:auto; align-self:start; }
+.tt-support > .tt-donate, .tt-support > .tt-fb { margin:0; }
+.tt-support:not(:has(> .tt-support-art)) { grid-template-columns:minmax(0,1fr); }
+.tt-support:not(:has(> .tt-support-art)) > * { grid-column:1; }
+.tt-support-foot { display:flex; flex-wrap:wrap; gap:8px 12px; align-items:center; margin:0; }
+.tt-support-foot .hint { margin:0; }
+@media (max-width:820px) { .tt-support { grid-template-columns:minmax(0,1fr); } .tt-support > * { grid-column:1; } .tt-support > .tt-support-art { display:none; } }

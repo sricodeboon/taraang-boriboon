@@ -2,6 +2,8 @@
 // รัน: BASE=http://127.0.0.1:8123/timetable/ DB=<ไฟล์ sqlite ของสำเนาทดสอบ> OUT=<โฟลเดอร์ผล> PW=<โฟลเดอร์ที่มี node_modules/playwright> node tests/e2e/timetable.e2e.mjs
 // ครอบ: SweetAlert2 (toast/ยืนยัน/พิมพ์ "ลบ"/เลิกทำ/409/ตัวสำรองเมื่อโหลด CDN ไม่ได้) · กันวิชาซ้ำ · แบ่งสอน · คาบ/สัปดาห์ตามหลักสูตร
 // · ลบทั้งหมด+เลิกทำ · แนวตาราง 2 แบบ (ลากวาง/คาบล็อก/พัก) · PDF/Excel · ข้อมูลภาคเรียนแบบเก่า · จอ 390px · ไม่มี console error/CSP
+// · รุ่น smart-boon: ลองใช้ประถม · ตัวช่วยเริ่มต้น (คละชั้น) · วางรายชื่อครู · เติมครูอัตโนมัติ · ติดแล้วกดแก้ให้เลย · จัดเฉพาะที่ขาด · Ctrl+Z
+//   · ฟอร์มข้อเสนอแนะ (สำเร็จ/honeypot/เร็วเกิน) + admin-feedback · #donate · CLS ตอนเปิดแอป · สแกนสีเขียว/แถบขอบซ้ายจาก computed style
 // ห้ามชี้ DB ไปที่ฐานข้อมูลจริง: สคริปต์ล้างตาราง rate_hits ของ DB ที่ให้มา (กันเพดานโหมดทดลองระหว่างทดสอบ)
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
@@ -57,9 +59,9 @@ async function check(page, label) {
 }
 const shot = (page, name, opts = {}) => page.screenshot({ path: join(OUT, name + '.png'), ...opts });
 
-async function guest(page) {
+async function guest(page, kind = 'sample') {
   await page.goto(BASE);
-  await page.click('form[action="auth/guest.php"] button');
+  await page.click(`form[action="auth/guest.php"] button[value="${kind}"]`);
   await page.waitForURL(/app\.php/);
   await page.waitForSelector('#tab-board .toolbar');
   await page.waitForFunction(() => /บันทึกแล้ว/.test(document.querySelector('#save-state')?.textContent || ''));
@@ -76,6 +78,21 @@ const toastText = async (page, re, timeout = 8000) => {
 async function forceSave(page) {
   await page.evaluate(() => document.querySelector('#save-state').click());
   await page.waitForFunction(() => /บันทึกแล้ว/.test(document.querySelector('#save-state').textContent), null, { timeout: 15000 });
+}
+/** รอผลจัดอัตโนมัติ: จัดครบ = toast · วางไม่ครบ = กล่องสรุป (modal) → กด "ปิด" · คืนข้อความที่เห็น */
+async function solveDone(page, timeout = 60000) {
+  const h = await page.waitForFunction(() => {
+    const m = document.querySelector('.swal2-popup:not(.swal2-toast)');
+    if (m && /วางไม่ลง|ยังขาด/.test(m.textContent)) return 'modal:' + m.textContent;
+    const t = [...document.querySelectorAll('.swal2-toast, #toast:not([hidden])')].find((e) => /จัดเสร็จ|วางเพิ่ม/.test(e.textContent));
+    return t ? 'toast:' + t.textContent : false;
+  }, null, { timeout });
+  const txt = await h.jsonValue();
+  if (txt.startsWith('modal:')) {
+    await page.locator('.swal2-popup:not(.swal2-toast) button', { hasText: /^ปิด$/ }).click();
+    await page.waitForSelector('.swal2-popup:not(.swal2-toast)', { state: 'detached' });
+  }
+  return txt;
 }
 async function gotoTab(page, t) { await page.click(`.tabs [data-tab="${t}"]`); await page.waitForTimeout(150); }
 async function dataSection(page, k) { await gotoTab(page, 'data'); await page.click(`[data-sec="${k}"]`); await page.waitForTimeout(150); }
@@ -139,8 +156,12 @@ await test('สลับแนวตาราง → คาบเรียงล
   await page.click('[data-orient="days"]');
 });
 
-await test('จัดอัตโนมัติ: toast กำลังจัด → จัดเสร็จ N คาบ · ไม่มีจุดชน', async () => {
+await test('จัดอัตโนมัติ: มีคาบแล้ว → เมนู 2 ข้อ → จัดใหม่ทั้งหมด (ยืนยัน) → จัดเสร็จ N คาบ · ไม่มีจุดชน', async () => {
   await page.click('#auto-solve');
+  await page.waitForSelector('.cell-menu [data-mode="missing"]');
+  await page.click('.cell-menu [data-mode="all"]');
+  // คาบที่ลากวางถูกปักหมุดหมด → ไม่มีคาบที่จะถูกย้าย จึงไม่ถามยืนยัน (ถามเฉพาะเมื่อมีคาบที่ไม่ได้ปักหมุด)
+  if (await page.locator('.swal2-popup:not(.swal2-toast) .swal2-title', { hasText: 'จัดใหม่ทั้งหมด' }).isVisible().catch(() => false)) await page.click('.swal2-confirm');
   await toastText(page, /จัดเสร็จ \d+ คาบ|วางไม่ลง/, 30000);
   const d = await store(page);
   const need = d.assignments.reduce((n, a) => n + a.perWeek, 0);
@@ -417,6 +438,416 @@ await test('โหลด SweetAlert2 ไม่ได้ → ใช้ toast/ก�
   await f.page.waitForTimeout(300);
   assert.equal((await store(f.page)).assignments.length, n0);
   assert.deepEqual(await check(f.page, 'fallback'), []);
+  await f.ctx.close();
+});
+
+// ---------------------------------------------------------------- รุ่น smart-boon: ตัวช่วยเริ่มต้น · วางรายชื่อ · เติมครู · แก้ให้เลย · ข้อเสนอแนะ
+const sql = (q) => execFileSync('sqlite3', [DB, q]).toString().trim();
+const pageWidth = (p) => p.evaluate(() => document.documentElement.scrollWidth);
+/** สแกน computed style ทั้งหน้า: สีเขียว (hue 75–165, sat > 0.2) และแถบสีขอบซ้าย (border-left หนา ≥ 2px ที่ด้านอื่นไม่มี/ต่างสี) */
+const scanStyle = (p) => p.evaluate(() => {
+  const parse = (s) => [...String(s).matchAll(/rgba?\(([^)]+)\)/g)].map((m) => m[1].split(/[ ,/]+/).filter(Boolean).map(Number));
+  const green = (c) => {
+    const [r, g, b, a = 1] = c;
+    if (a < 0.05) return false;
+    const R = r / 255, G = g / 255, B = b / 255, mx = Math.max(R, G, B), mn = Math.min(R, G, B), l = (mx + mn) / 2, dd = mx - mn;
+    if (!dd) return false;
+    const s = dd / (1 - Math.abs(2 * l - 1));
+    let h = mx === R ? ((G - B) / dd) % 6 : mx === G ? (B - R) / dd + 2 : (R - G) / dd + 4;
+    h = (h * 60 + 360) % 360;
+    return h >= 75 && h <= 165 && s > 0.2;
+  };
+  const name = (e) => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + (typeof e.className === 'string' && e.className ? '.' + e.className.trim().split(/\s+/).slice(0, 2).join('.') : '');
+  const greens = [], bars = [];
+  for (const e of document.querySelectorAll('body *')) {
+    const cs = getComputedStyle(e);
+    if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+    const r = e.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    const hasText = [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+    const props = [['background-color', cs.backgroundColor], ['background-image', cs.backgroundImage], ['fill', cs.fill], ['stroke', cs.stroke]];
+    if (hasText) props.push(['color', cs.color]);
+    for (const side of ['Top', 'Right', 'Bottom', 'Left']) if (parseFloat(cs['border' + side + 'Width']) > 0) props.push(['border-' + side.toLowerCase(), cs['border' + side + 'Color']]);
+    for (const [k, v] of props) if (parse(v).some(green)) { greens.push(`${name(e)} ${k}=${v}`); break; }
+    const bl = parseFloat(cs.borderLeftWidth);
+    if (bl >= 2 && cs.borderLeftStyle !== 'none' && (parse(cs.borderLeftColor)[0]?.[3] ?? 1) > 0.05) {
+      const others = ['Top', 'Right', 'Bottom'].map((s) => [parseFloat(cs['border' + s + 'Width']), cs['border' + s + 'Color']]);
+      if (others.some(([w, c]) => w < bl || c !== cs.borderLeftColor)) bars.push(`${name(e)} border-left ${cs.borderLeftWidth} ${cs.borderLeftColor}`);
+    }
+    if (/inset\s+[2-9]\d*px\s+0/.test(cs.boxShadow) || /^rgba?\([^)]*\)\s+[2-9]\d*px\s+0px\s+0px\s+0px\s+inset/.test(cs.boxShadow)) bars.push(`${name(e)} box-shadow ${cs.boxShadow}`);
+    // pseudo-element: แถบผอมสูง (กว้าง 2–8px สูง ≥ 2.5 เท่า) ที่มีสี = แถบขอบซ้ายแบบ ::before (เช่น .cell::before เดิม) · จุดกลม/ไอคอนไม่นับ
+    for (const pe of ['::before', '::after']) {
+      const ps = getComputedStyle(e, pe);
+      if (ps.content === 'none' || ps.content === 'normal' || ps.display === 'none') continue;
+      // getComputedStyle ของ pseudo คืนค่า auto เมื่อขนาดมาจาก top/bottom หรือ grid → คำนวณจากกล่องแม่แทน
+      const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      let w = parseFloat(ps.width), h = parseFloat(ps.height);
+      if (Number.isNaN(w) && cs.display.includes('grid') && ps.position === 'static') w = parseFloat(cs.gridTemplateColumns);
+      if (Number.isNaN(h) && /absolute|fixed/.test(ps.position) && !Number.isNaN(parseFloat(ps.top)) && !Number.isNaN(parseFloat(ps.bottom))) h = e.clientHeight - parseFloat(ps.top) - parseFloat(ps.bottom);
+      if (Number.isNaN(h) && ps.position === 'static' && /grid|flex/.test(cs.display) && /stretch|normal/.test(ps.alignSelf)) h = e.clientHeight - pad;
+      const painted = (parse(ps.backgroundColor)[0]?.[3] ?? (parse(ps.backgroundColor).length ? 1 : 0)) > 0.05 || ps.backgroundImage !== 'none';
+      if (painted && parse(ps.backgroundColor).some(green)) greens.push(`${name(e)}${pe} background=${ps.backgroundColor}`);
+      if (painted && w >= 2 && w <= 8 && h >= w * 2.5) bars.push(`${name(e)}${pe} ${w}x${h}px ${ps.backgroundColor}`);
+    }
+  }
+  return { greens: [...new Set(greens)].slice(0, 15), bars: [...new Set(bars)].slice(0, 15) };
+});
+async function assertStyle(p, label) {
+  const s = await scanStyle(p);
+  assert.deepEqual(s.greens, [], `${label}: พบสีเขียว`);
+  assert.deepEqual(s.bars, [], `${label}: พบแถบสีขอบซ้าย`);
+}
+
+const sb = await open();
+const P = sb.page;
+const TEACHERS8 = [
+  'นางสาวสมศรี ใจดี\tภาษาไทย\tป.1-2',
+  'นายสมชาย รักเรียน\tคณิตศาสตร์\tป.3',
+  'นางมาลี สีสวย\tวิทยาศาสตร์\tป.4',
+  'ด.ต.ประสิทธิ์ กล้าหาญ\tสังคมศึกษา\tป.5',
+  'นางสาวกาญจนา แก้วใส\tภาษาไทย\tป.6',
+  'นายจอห์น สมิธ\tภาษาอังกฤษ\t',
+  'นายวีระ แข็งแรง\tสุขศึกษาและพลศึกษา\t',
+  'นางสาวดวงใจ ศิลป์งาม\tศิลปะ\t',
+].join('\n');
+
+await test('ลองใช้ทันที · ประถม: ได้ข้อมูลตัวอย่างประถม (ป.1…) ไม่ใช่มัธยม · ตัวช่วยไม่เปิดเองกับข้อมูลตัวอย่าง', async () => {
+  await guest(P, 'sample-primary');
+  const d = await store(P);
+  assert.ok(d.classes.some((c) => c.name === 'ป.1'), d.classes.map((c) => c.name).join(','));
+  assert.ok(!d.classes.some((c) => /^ม\./.test(c.name)));
+  await P.waitForTimeout(400);
+  assert.equal(await P.locator('dialog[open] #wz-title').count(), 0);
+  await assertStyle(P, 'app board (ประถม)');
+});
+
+await test('ตัวช่วยเริ่มต้น 4 คำถาม: ภาคเรียนว่าง → เปิดเอง → ประถม 6 ชั้น + คละชั้น ป.1-2 → ได้ 5 ห้อง ลูกเสือรายห้อง การสอนร่างไม่มีครู', async () => {
+  await P.selectOption('#term-select', '__new');
+  await P.waitForSelector('.swal2-popup #nt-kind');
+  await P.selectOption('#nt-kind', 'blank:primary');
+  await P.fill('#nt-name', 'ทดสอบตัวช่วย 1/2570');
+  await P.click('.swal2-confirm');
+  await P.waitForSelector('dialog[open] #wz-title', { timeout: 15000 });
+  await P.click('dialog[open] [data-preset="0"]');
+  assert.equal(await P.inputValue('#wz-min'), '60');
+  assert.equal(await P.inputValue('#wz-count'), '6');
+  await P.check('dialog[open] [data-combine-on]');
+  await P.check('dialog[open] [data-pair="ป.1|ป.2"]');
+  assert.ok(await P.locator('dialog[open] [data-pair="ป.2|ป.3"]').isDisabled(), 'คู่ที่ซ้อนกันกดไม่ได้');
+  await shot(P, '20-wizard');
+  await assertStyle(P, 'wizard dialog');
+  await P.click('dialog[open] [data-ok]');
+  await toastText(P, /สร้างห้อง \d+ ห้อง/);
+  const d = await store(P);
+  assert.deepEqual(d.classes.map((c) => c.name), ['ป.1-2', 'ป.3', 'ป.4', 'ป.5', 'ป.6']);
+  assert.equal(d.term.periods.filter((p) => p.type !== 'break').length, 6);
+  assert.ok(d.assignments.length > 0 && d.assignments.every((a) => !a.teacherId), 'การสอนร่างยังไม่มีครู');
+  assert.ok(d.locks.length >= 5, 'มีคาบล็อก');
+  assert.ok(d.meta?.setup?.wizardAt, 'meta.setup');
+  assert.equal(await P.locator('dialog[open] #wz-title').count(), 0);
+});
+
+await test('วางรายชื่อครู 8 บรรทัด (คำนำหน้า/ยศ + กลุ่มสาระ + ประจำชั้น) → ตรวจก่อนเพิ่ม → เพิ่ม 8 คน · เลิกทำได้', async () => {
+  await dataSection(P, 'teachers');
+  await P.click('[data-paste="teachers"]');
+  await P.fill('dialog[open] [data-text]', TEACHERS8);
+  await P.click('dialog[open] [data-next]');
+  await P.waitForSelector('dialog[open] .imp-table');
+  assert.equal(await P.locator('dialog[open] .imp-table tbody tr').count(), 8);
+  await shot(P, '21-paste-preview');
+  assert.match(await P.locator('dialog[open] [data-ok]').textContent(), /8/);
+  await P.click('dialog[open] [data-ok]');
+  await toastText(P, /เพิ่มครู 8 คน/);
+  let d = await store(P);
+  assert.equal(d.teachers.length, 8);
+  assert.ok(!d.teachers.some((t) => /^(นาย|นาง|ด\.ต\.)/.test(t.name)), 'ตัดคำนำหน้า: ' + d.teachers.map((t) => t.name).join(','));
+  assert.equal(d.teachers.filter((t) => t.homeroom).length, 5, 'ประจำชั้น 5 ห้อง');
+  assert.ok(d.teachers.every((t) => t.subjects?.length), 'มีกลุ่มสาระทุกคน');
+  // เลิกทำ แล้ววางซ้ำ (ข้อความที่วางจำไว้)
+  await P.click('.swal2-toast .swal2-confirm');
+  await P.waitForTimeout(300);
+  assert.equal((await store(P)).teachers.length, 0);
+  await P.click('[data-paste="teachers"]');
+  assert.equal((await P.inputValue('dialog[open] [data-text]')).split('\n').length, 8, 'จำข้อความเดิมไว้');
+  await P.click('dialog[open] [data-next]');
+  await P.click('dialog[open] [data-ok]');
+  await toastText(P, /เพิ่มครู 8 คน/);
+  d = await store(P);
+  assert.equal(d.teachers.length, 8);
+});
+
+await test('เติมครูอัตโนมัติ 1 คลิก: ยังไม่มีครู ≤ 10% · commit ครั้งเดียว · เลิกทำคืนว่าง', async () => {
+  await dataSection(P, 'assignments');
+  const n0 = (await store(P)).assignments.length;
+  await P.click('[data-auto]');
+  await toastText(P, /เติมครู \d+ แถว/);
+  const d = await store(P);
+  const left = d.assignments.filter((a) => !a.teacherId).length;
+  assert.ok(left <= Math.floor(n0 * 0.1), `ยังไม่มีครู ${left}/${n0}`);
+  await shot(P, '22-autoassign');
+  await assertStyle(P, 'data assignments');
+  // เลิกทำ แล้วเติมใหม่
+  await P.click('.swal2-toast .swal2-confirm');
+  await P.waitForTimeout(300);
+  assert.equal((await store(P)).assignments.filter((a) => !a.teacherId).length, n0);
+  await P.click('[data-auto]');
+  await toastText(P, /เติมครู \d+ แถว/);
+});
+
+let beforeMissing = null;
+await test('จัด → ติด (ครูสอนได้วันละ 1 คาบ) → ปุ่ม "เพิ่มเป็น N" แก้ให้เลย → จัดเฉพาะที่ขาด คาบเดิมอยู่ที่เดิม', async () => {
+  // ทำให้ติด: ครูที่สอนมากสุดสอนได้แค่วันละ 1 คาบ
+  const tid = await P.evaluate(async () => {
+    const { store } = await import('./assets/store.js');
+    const load = new Map();
+    for (const a of store.doc.assignments) if (a.teacherId) load.set(a.teacherId, (load.get(a.teacherId) || 0) + a.perWeek);
+    const [id] = [...load.entries()].sort((a, b) => b[1] - a[1])[0];
+    store.doc.teachers.find((t) => t.id === id).maxPerDay = 1;
+    store.commit('data');
+    return id;
+  });
+  await gotoTab(P, 'board');
+  await P.click('#auto-solve');
+  // วางไม่ครบ → กล่องสรุป (modal) บอกสาเหตุหลัก + วิธีแก้ · ปิดแล้วใช้ปุ่มแก้ให้เลยในรายงานบนกระดาน
+  await P.waitForFunction(() => /วางไม่ลง \d+ คาบ/.test(document.querySelector('.swal2-popup:not(.swal2-toast)')?.textContent || ''), null, { timeout: 60000 });
+  assert.match(await P.locator('.swal2-popup').textContent(), /สูงสุด\/วัน/);
+  await P.locator('.swal2-popup:not(.swal2-toast) button', { hasText: /^ปิด$/ }).click();
+  await P.waitForSelector('.swal2-popup:not(.swal2-toast)', { state: 'detached' });
+  const fix = P.locator('[data-fix]', { hasText: /เพิ่มเป็น/ }).first();
+  await fix.waitFor({ timeout: 10000 });
+  await shot(P, '23-stuck-fix');
+  await assertStyle(P, 'board report');
+  await fix.click();
+  await toastText(P, /สูงสุด|เพิ่ม/);
+  let d = await store(P);
+  assert.ok(d.teachers.find((t) => t.id === tid).maxPerDay > 1, 'เพิ่ม maxPerDay แล้ว');
+  beforeMissing = d.placements.map((p) => `${p.assignmentId}@${p.day}.${p.period}`).sort();
+  const need = d.assignments.filter((a) => a.teacherId).reduce((n, a) => n + a.perWeek, 0);
+  assert.ok(beforeMissing.length < need, 'ยังขาดอยู่ก่อนจัดเฉพาะที่ขาด');
+  await P.click('#auto-solve');
+  await P.waitForSelector('.cell-menu [data-mode="missing"]:not([disabled])');
+  await P.click('.cell-menu [data-mode="missing"]');
+  const res = await solveDone(P);
+  assert.ok(!/สุ่มลำดับใหม่ทุกครั้ง/.test(res), 'ข้อความต้องไม่บอกว่าสุ่มใหม่ทุกครั้ง (seed คงที่แล้ว)');
+  d = await store(P);
+  const after = new Set(d.placements.map((p) => `${p.assignmentId}@${p.day}.${p.period}`));
+  for (const k of beforeMissing) assert.ok(after.has(k), 'คาบเดิมต้องอยู่ที่เดิม ' + k);
+  assert.ok(after.size > beforeMissing.length, `วางเพิ่ม ${after.size - beforeMissing.length} คาบ`);
+  assert.equal(d.meta?.lastSolve?.mode, 'missing');
+  await shot(P, '24-solve-missing');
+});
+
+await test('Ctrl+Z บนกระดาน: ย้อนผลจัดเฉพาะที่ขาด (ใช้ได้ตอนแป้นไทย) · ไม่ดักเมื่อโฟกัสในช่องกรอก', async () => {
+  await P.evaluate(() => document.activeElement?.blur());
+  await P.keyboard.press('Control+KeyZ');
+  await P.waitForTimeout(300);
+  let d = await store(P);
+  assert.deepEqual(d.placements.map((p) => `${p.assignmentId}@${p.day}.${p.period}`).sort(), beforeMissing);
+  // ลาก 1 คาบ แล้ว Ctrl+Z คืน
+  const n = d.placements.length;
+  const chip = P.locator('.chip[data-asg]:not(.done)').first();
+  const cell = P.locator('.tt tbody td[data-day]:not(.lock):not(:has(.cell))').first();
+  await drag(P, chip, cell);
+  d = await store(P);
+  if (d.placements.length === n + 1) {
+    await P.evaluate(() => document.activeElement?.blur());
+    await P.keyboard.press('Control+KeyZ');
+    await P.waitForTimeout(300);
+    assert.equal((await store(P)).placements.length, n);
+  }
+  // โฟกัสใน input (ตัวเลือกห้อง/ช่องค้นหา) → ไม่ดัก
+  await gotoTab(P, 'data');
+  await P.click('[data-sec="teachers"]');
+  const inp = P.locator('#data-body input[data-f="name"]').first();
+  await inp.focus();
+  const before = (await store(P)).placements.length;
+  await P.keyboard.press('Control+KeyZ');
+  await P.waitForTimeout(200);
+  assert.equal((await store(P)).placements.length, before);
+  await forceSave(P);
+});
+
+await test('ตัวสแกนจับแถบซ้ายแบบ ::before ได้จริง (กันผ่านหลอก)', async () => {
+  await gotoTab(P, 'board');
+  const s = await P.evaluate(() => {
+    const st = document.createElement('style');
+    st.id = 'bar-probe';
+    // แบบเดิมทั้ง 2 จุด: .cell::before (absolute 4px) และ .chip::before (คอลัมน์ grid 6px ยืดเต็มสูง)
+    st.textContent = '.tt .cell::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:#1F5FA8}'
+      + '.chip{grid-template-columns:6px 1fr auto!important}.chip::before{align-self:stretch;width:auto;height:auto;border-radius:3px}';
+    document.head.appendChild(st);
+    return { cell: !!document.querySelector('.tt .cell'), chip: !!document.querySelector('.chip') };
+  });
+  const r = await scanStyle(P);
+  await P.evaluate(() => document.getElementById('bar-probe')?.remove());
+  if (s.cell) assert.ok(r.bars.some((b) => /cell.*::before/.test(b)), 'ต้องจับ .cell::before ได้: ' + r.bars.join(' | '));
+  if (s.chip) assert.ok(r.bars.some((b) => /chip.*::before/.test(b)), 'ต้องจับ .chip::before ได้: ' + r.bars.join(' | '));
+  assert.ok(s.cell || s.chip, 'ต้องมี .cell หรือ .chip ให้ทดสอบ');
+  await assertStyle(P, 'board (ไม่มีแถบ ::before)');
+});
+
+await test('จัดเฉพาะที่ขาด → "ลองอีกแบบ" ได้คาบวางเพิ่มจริง (ไม่ตรึงคาบที่รอบก่อนวางเพิ่ม) · คาบเดิมอยู่ที่เดิม · กลับไปแบบก่อนได้', async () => {
+  await gotoTab(P, 'board');
+  const key = (p) => `${p.assignmentId}@${p.day}.${p.period}`;
+  const base = new Set((await store(P)).placements.map(key));
+  await P.click('#auto-solve');
+  await P.waitForSelector('.cell-menu [data-mode="missing"]:not([disabled])');
+  await P.click('.cell-menu [data-mode="missing"]');
+  await solveDone(P);
+  const v1 = (await store(P)).placements.map(key).sort();
+  assert.ok(v1.length > base.size, 'รอบแรกวางเพิ่มได้');
+  await P.locator('[data-solve="again"]').click();
+  await solveDone(P);
+  const d = await store(P);
+  const v2 = d.placements.map(key).sort();
+  for (const k of base) assert.ok(v2.includes(k), 'คาบก่อนจัดเฉพาะที่ขาดต้องอยู่ที่เดิม ' + k);
+  assert.ok(v2.length > base.size, `ลองอีกแบบต้องวางเพิ่มได้ (ได้ ${v2.length - base.size})`);
+  const added = await P.evaluate(() => document.querySelector('.solve-extra')?.textContent || '');
+  assert.ok(!/วางเพิ่ม 0 คาบ|วางเพิ่มได้ 0 คาบ/.test(added), 'ข้อความต้องไม่บอกว่าวางเพิ่ม 0 คาบ: ' + added.trim().slice(0, 80));
+  assert.notDeepEqual(v2, v1, 'seed ใหม่ต้องได้แบบใหม่');
+  await P.locator('[data-solve="back"]').click();
+  await toastText(P, /กลับไปใช้แบบก่อนหน้า/);
+  assert.deepEqual((await store(P)).placements.map(key).sort(), v1);
+});
+
+await test('แถวที่ยังไม่มีครู: 2 ห้องวางคาบเดียวกันได้ (ไม่ขึ้น "ครูสอนห้องอื่นอยู่") · ปักหมุดแล้ว "จัดใหม่ทั้งหมด" ไม่หาย ไม่มีวิชาอื่นทับ', async () => {
+  await gotoTab(P, 'board');
+  const r = await P.evaluate(async () => {
+    const m = await import('./assets/store.js');
+    const { store } = m;
+    const d = store.doc, P = d.term.periods.length;
+    const byClass = new Map();
+    for (const a of d.assignments) if (!byClass.has(a.classId)) byClass.set(a.classId, a);
+    const [a1, a2] = [...byClass.values()];
+    a1.teacherId = null; a2.teacherId = null;
+    d.placements = d.placements.filter((p) => p.assignmentId !== a1.id && p.assignmentId !== a2.id);
+    // ช่องที่ทั้งสองห้องไม่ใช่คาบล็อก/พัก → เอาคาบอื่นของสองห้องในช่องนั้นออก
+    let slot = null;
+    for (let day = 0; day < d.term.days && !slot; day++) for (let period = 0; period < P && !slot; period++) {
+      if (d.term.periods[period].type === 'break') continue;
+      if (d.locks.some((l) => l.day === day && l.period === period && (l.classId == null || l.classId === a1.classId || l.classId === a2.classId))) continue;
+      slot = { day, period };
+    }
+    d.placements = d.placements.filter((p) => !(p.day === slot.day && p.period === slot.period && [a1.classId, a2.classId].includes(d.assignments.find((a) => a.id === p.assignmentId)?.classId)));
+    d.placements.push({ assignmentId: a1.id, day: slot.day, period: slot.period, pinned: true });
+    store.commit('data');
+    const why = m.whyCannotPlace(a2, slot.day, slot.period);
+    return { a1: a1.id, cls: a1.classId, slot, why };
+  });
+  assert.equal(r.why, null, 'แถวไม่มีครูสองห้องช่องเดียวกันต้องวางได้: ' + r.why);
+  await P.click('#auto-solve');
+  await P.waitForSelector('.cell-menu [data-mode="all"]');
+  await P.click('.cell-menu [data-mode="all"]');
+  const ok = P.locator('.swal2-popup:not(.swal2-toast) .swal2-confirm');
+  if (await ok.isVisible({ timeout: 3000 }).catch(() => false)) await ok.click();
+  await solveDone(P);
+  const d = await store(P);
+  assert.ok(d.placements.some((p) => p.assignmentId === r.a1 && p.day === r.slot.day && p.period === r.slot.period && p.pinned), 'คาบปักหมุดของแถวไม่มีครูต้องอยู่');
+  const clsAt = d.placements.filter((p) => p.day === r.slot.day && p.period === r.slot.period && d.assignments.find((a) => a.id === p.assignmentId)?.classId === r.cls);
+  assert.equal(clsAt.length, 1, 'ห้องนั้นช่องนั้นต้องมีคาบเดียว (solver ไม่วางทับ)');
+  await forceSave(P);
+});
+
+await test('แอป: เมนู "สนับสนุน" → แท็บส่งออก กล่องบริจาคกางเอง · ทุกแท็บไม่มีสีเขียว/แถบขอบซ้าย · ไม่มี console error', async () => {
+  await gotoTab(P, 'board');
+  const sup = P.locator('.bar-support[href="#donate"]');
+  if (await sup.count()) {
+    await sup.click();
+    await P.waitForSelector('#tab-export #donate-d[open]', { timeout: 5000 });
+  }
+  for (const t of ['periods', 'data', 'export']) { await gotoTab(P, t); await assertStyle(P, 'app ' + t); }
+  assert.deepEqual(await check(P, 'smart-boon app'), []);
+});
+
+await test('แอป: เปิดหน้า CLS < 0.02 (แถบขั้นตอน + ครูบูรณ์แทรกเหนือ main ไม่ดันเนื้อหา)', async () => {
+  await P.addInitScript(() => {
+    window.__cls = 0;
+    new PerformanceObserver((l) => { for (const e of l.getEntries()) if (!e.hadRecentInput) window.__cls += e.value; }).observe({ type: 'layout-shift', buffered: true });
+  });
+  await P.goto(BASE + 'app.php');
+  await P.waitForSelector('#tt-steps');
+  await P.waitForTimeout(1500);
+  const cls = await P.evaluate(() => window.__cls);
+  assert.ok(cls < 0.02, 'CLS = ' + cls.toFixed(4));
+});
+await sb.ctx.close();
+
+await test('หน้าแรก (ไม่ล็อกอิน): #donate กางเอง · 390px ไม่มีเลื่อนแนวนอน · ไม่มีสีเขียว/แถบขอบซ้าย · ไม่มี console/CSP', async () => {
+  for (const vp of [{ width: 390, height: 844 }, { width: 1366, height: 900 }]) {
+    const h = await open(vp);
+    await h.page.goto(BASE + '#donate');
+    await h.page.waitForSelector('#donate-d[open]', { timeout: 5000 });
+    assert.ok((await pageWidth(h.page)) <= vp.width, `index ${vp.width}: กว้าง ${await pageWidth(h.page)}`);
+    await shot(h.page, `25-index-donate-${vp.width}`, { fullPage: true });
+    await assertStyle(h.page, 'index ' + vp.width);
+    for (const pth of ['guide.php', 'privacy.php', 'terms.php']) {
+      await h.page.goto(BASE + pth);
+      assert.ok((await pageWidth(h.page)) <= vp.width, `${pth} ${vp.width}: กว้าง ${await pageWidth(h.page)}`);
+      await assertStyle(h.page, pth + ' ' + vp.width);
+    }
+    await h.page.goto(BASE + 'guide.php#donate');
+    await h.page.waitForSelector('#donate-d[open]', { timeout: 5000 });
+    assert.deepEqual(await check(h.page, 'public ' + vp.width), []);
+    await h.ctx.close();
+  }
+});
+
+await test('ฟอร์มข้อเสนอแนะ: ส่งเร็วเกิน 4 วิ = สำเร็จหลอกไม่บันทึก · honeypot = ไม่บันทึก · ส่งจริง = บันทึก 1 แถว · หน้า admin-feedback', async () => {
+  if (!DB) return;
+  const f = await open({ width: 390, height: 844 });
+  const fp = f.page;
+  const tag = 'e2e-' + Date.now();
+  const count = () => +sql(`SELECT count(*) FROM feedback WHERE message LIKE '%${tag}%'`);
+  const fill = async (msg) => {
+    await fp.locator('#feedback .tt-chip').first().click();
+    await fp.fill('#feedback textarea[name=message]', msg);
+  };
+  await fp.goto(BASE + '#feedback');
+  // 1) เร็วเกิน
+  await fill(`ส่งเร็วเกิน ${tag} ข้อความทดสอบ`);
+  await fp.click('#feedback button[type=submit]');
+  await fp.waitForSelector('#feedback [data-fb-done]:not([hidden])');
+  assert.equal(count(), 0, 'ส่งเร็วเกินต้องไม่บันทึก');
+  // 2) honeypot
+  await fp.click('#feedback [data-fb-again]');
+  await fp.waitForTimeout(4300);
+  await fill(`honeypot ${tag} ข้อความทดสอบ`);
+  await fp.evaluate(() => { document.querySelector('#feedback input[name=website]').value = 'http://spam.example'; });
+  await fp.click('#feedback button[type=submit]');
+  await fp.waitForSelector('#feedback [data-fb-done]:not([hidden])');
+  assert.equal(count(), 0, 'honeypot ต้องไม่บันทึก');
+  // 3) ส่งจริง
+  await fp.click('#feedback [data-fb-again]');
+  await fp.evaluate(() => { document.querySelector('#feedback input[name=website]').value = ''; });
+  await fill(`ส่งจริง ${tag} อยากให้มีปุ่มพิมพ์ตารางครู <b>xss</b>`);
+  await fp.fill('#feedback input[name=contact]', 'kru@example.com');
+  await fp.click('#feedback button[type=submit]');
+  await fp.waitForSelector('#feedback [data-fb-done]:not([hidden])');
+  assert.equal(count(), 1, 'ส่งจริงต้องบันทึก 1 แถว');
+  assert.equal(sql(`SELECT status||'|'||kind||'|'||IFNULL(page,'') FROM feedback WHERE message LIKE '%${tag}%'`).split('|')[0], 'new');
+  // หน้าแอดมิน: ไม่ใช่แอดมิน = 404
+  let r = await fp.goto(BASE + 'admin-feedback.php');
+  assert.equal(r.status(), 404);
+  fp.errors.length = 0; // 404 ที่ตั้งใจ (เบราว์เซอร์พิมพ์ลง console เอง)
+  // เข้าโหมดทดลอง แล้วยกผู้ใช้นั้นเป็นแอดมินในฐานข้อมูลสำเนา (ทดสอบเท่านั้น)
+  await guest(fp);
+  sql("UPDATE users SET provider='google', email='sricodeboon@gmail.com' WHERE id=(SELECT max(id) FROM users)");
+  r = await fp.goto(BASE + 'admin-feedback.php?s=new');
+  assert.equal(r.status(), 200);
+  const item = fp.locator('.fb-item', { hasText: tag });
+  await item.waitFor();
+  assert.match(await item.locator('.fb-msg').innerHTML(), /&lt;b&gt;xss/);
+  assert.ok((await pageWidth(fp)) <= 390, 'admin-feedback 390px');
+  await assertStyle(fp, 'admin-feedback');
+  await shot(fp, '26-admin-feedback', { fullPage: true });
+  await item.locator('select[name=status]').selectOption('replied');
+  await item.locator('textarea[name=note]').fill('ตอบทางอีเมลแล้ว');
+  await item.locator('button[type=submit]').click();
+  await fp.waitForLoadState('load');
+  assert.equal(sql(`SELECT status||'|'||note_admin FROM feedback WHERE message LIKE '%${tag}%'`), 'replied|ตอบทางอีเมลแล้ว');
+  r = await fp.goto(BASE + 'admin.php');
+  assert.equal(r.status(), 200);
+  assert.deepEqual(await check(fp, 'feedback/admin'), []);
   await f.ctx.close();
 });
 

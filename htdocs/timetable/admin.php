@@ -1,5 +1,5 @@
 <?php
-// หน้าผู้ดูแลระบบ (อ่านอย่างเดียว): ใครมาสมัคร โรงเรียนไหน อยู่ที่ไหน และใครควรได้รับความช่วยเหลือก่อน
+// หน้าผู้ดูแลระบบ (อ่านอย่างเดียว · ข้อเสนอแนะแก้สถานะได้ที่ admin-feedback.php): ใครมาสมัคร โรงเรียนไหน อยู่ที่ไหน และใครควรได้รับความช่วยเหลือก่อน
 // เปิดได้เฉพาะบัญชี Google ที่อยู่ในรายการแอดมิน (admin_emails) · คนอื่นได้ 404 เหมือนหน้าไม่มีอยู่จริง
 require __DIR__ . '/lib/bootstrap.php';
 require __DIR__ . '/lib/layout.php';
@@ -23,6 +23,7 @@ $t0 = microtime(true);
 $sum = admin_summary();
 $list = admin_rows($q, $prio, $all, $page);
 $geo = admin_geo();
+$fbNew = feedback_new_count();
 $ms = (int) round((microtime(true) - $t0) * 1000);
 
 /** ลิงก์หน้าเดิมโดยเปลี่ยนพารามิเตอร์บางตัว */
@@ -51,6 +52,7 @@ page_head('ผู้ดูแลระบบ · ตารางบริบู�
   <span class="adm-tag">ผู้ดูแลระบบ</span>
   <nav class="adm-nav">
     <span class="muted adm-me" title="<?= h($me['email']) ?>"><?= h($me['name'] ?? $me['email']) ?></span>
+    <a class="btn btn-sm" href="admin-feedback.php"<?= $fbNew ? ' aria-label="ข้อเสนอแนะ ใหม่ ' . $fbNew . ' ข้อความ"' : '' ?>>ข้อเสนอแนะ<?php if ($fbNew): ?><span class="nbadge" aria-hidden="true"><?= $fbNew > 99 ? '99+' : number_format($fbNew) ?></span><?php endif; ?></a>
     <a class="btn btn-sm" href="app.php">กลับไปจัดตาราง</a>
   </nav>
 </header>
@@ -70,7 +72,8 @@ page_head('ผู้ดูแลระบบ · ตารางบริบู�
     <p class="sys muted">
       <span>ทดลองค้าง <b><?= number_format($sum['guests']) ?></b><?= $sum['guest_oldest'] ? ' · เก่าสุด ' . h(th_ago($sum['guest_oldest'])) : '' ?></span>
       <span>ฐานข้อมูล <b><?= h(fmt_bytes($sum['db_bytes'])) ?></b></span>
-      <span>ลองใช้ทันที <b><?= number_format($sum['rate_h1']) ?></b> / ชม. · <b><?= number_format($sum['rate_d1']) ?></b> / วัน</span>
+      <span title="จำนวนครั้งที่สร้างโรงเรียนทดลอง (ถัง guest:all)">ลองใช้ทันที <b><?= number_format($sum['rate_h1']) ?></b> / ชม. · <b><?= number_format($sum['rate_d1']) ?></b> / วัน</span>
+      <span>ข้อเสนอแนะใหม่ <a href="admin-feedback.php?s=new"><b><?= number_format($fbNew) ?></b></a></span>
     </p>
   </section>
 

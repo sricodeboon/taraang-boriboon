@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
-import { solve, validate, score, toSolverInput } from '../assets/solver/solver.js';
+import { solve, validate, score, toSolverInput, capacityCheck } from '../assets/solver/solver.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PATH = join(here, '../assets/solver/sample-school.json');
@@ -458,6 +458,274 @@ await test('ผู้ใช้จริง: งานสอนที่ยัง
   assert.ok(r.placements.length >= perWeekTotal(d) - d.assignments[2].perWeek - 2);
   assert.ok(r.unplaced.some((u) => u.assignmentId === d.assignments[2].id && /ไม่พบห้องเรียน/.test(u.reason)));
   assert.ok(r.stats.warnings.some((w) => w.includes('ครูที่ไม่พบ')));
+});
+
+// ── WP0: solverInput ส่ง subjectId/label · WP6: รหัสเหตุผล + capacityCheck + ปุ่มแก้ให้เลย ─────────────
+const CODES = new Set(['CLASS_OVER', 'TEACHER_OVER', 'TEACHER_MAX_DAY', 'ROOM_OVER', 'DOUBLE_NO_SLOT', 'BLOCKED_TEACHER', 'BLOCKED_ROOM', 'BLOCKED_CLASS',
+  'NO_TEACHER', 'BAD_DATA', 'CROWDED_TEACHER', 'CROWDED_ROOM', 'CROWDED_CLASS', 'CROWDED_MAX_DAY']);
+const assertCoded = (r) => {
+  for (const u of r.unplaced) {
+    assert.ok(CODES.has(u.code), `ไม่มี code: ${JSON.stringify(u)}`);
+    assert.ok(u.params && typeof u.params === 'object', JSON.stringify(u));
+    assert.ok(typeof u.reason === 'string' && u.reason.length > 5);
+  }
+};
+/** ห้องเดียว 5 วัน 6 คาบ: วิชา s1 แบ่งสอน 3+2 คาบ (2 ครู) + วิชาอื่นเติมให้แน่นพอประมาณ */
+function splitCase(withSubject = true) {
+  const asg = [
+    { id: 'p1', subjectId: 's1', classId: 'c1', teacherId: 't1', perWeek: 3 },
+    { id: 'p2', subjectId: 's1', classId: 'c1', teacherId: 't2', perWeek: 2 },
+    { id: 'q1', subjectId: 's2', classId: 'c1', teacherId: 't1', perWeek: 4 },
+    { id: 'q2', subjectId: 's3', classId: 'c1', teacherId: 't2', perWeek: 4 },
+  ];
+  if (!withSubject) for (const a of asg) delete a.subjectId;
+  return { days: 5, periods: Array(6).fill({ type: 'class' }), classes: [{ id: 'c1' }], teachers: [{ id: 't1', maxPerDay: 6 }, { id: 't2', maxPerDay: 6 }], rooms: [], assignments: asg, locks: [], fixed: [] };
+}
+
+await test('WP0 แบ่งสอน 3+2 คาบวิชาเดียวกัน 2 ครู → ไม่ลงวันเดียวกันเมื่อมีช่องพอ (soft sameDay = 0)', () => {
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const inp = splitCase();
+    const r = solve(inp, { seed, timeLimitMs: 1500 });
+    assert.equal(r.unplaced.length, 0);
+    const days = r.placements.filter((p) => p.assignmentId === 'p1' || p.assignmentId === 'p2').map((p) => p.day);
+    assert.equal(new Set(days).size, 5, `seed ${seed}: s1 ลงซ้ำวัน ${days}`);
+    assert.equal(score(inp, r.placements).sameDay, 0);
+  }
+  // ไม่มี subjectId (บั๊กเดิม): solver มองเป็นคนละวิชา จึงนับ sameDay ไม่ได้ — ยืนยันว่ากลุ่มมาจาก subjectId จริง
+  const noSub = splitCase(false);
+  const pl = [0, 1, 2].map((d) => ({ assignmentId: 'p1', day: d, period: 0 })).concat([0, 1].map((d) => ({ assignmentId: 'p2', day: d, period: 1 })));
+  assert.equal(score(noSub, pl).sameDay, 0);
+  assert.equal(score(splitCase(), pl).sameDay, 2);
+});
+
+// board.js ใช้ใน node ได้ด้วย DOM จำลองขั้นต่ำ (ไม่มี window.load → ตัวตรวจ solver โหลดเมื่อ readyState = complete)
+globalThis.document = { readyState: 'complete', addEventListener() {}, dispatchEvent() {} };
+globalThis.window = { addEventListener() {} };
+const board = await import('../assets/board.js');
+const { store, index } = await import('../assets/store.js');
+const useDoc = (d) => { store.doc = d; index(); return d; };
+await new Promise((r) => setTimeout(r, 400));        // validate() โหลดหลัง 300 ms
+useDoc(firstUserCase());
+board.readiness();                                    // เริ่มโหลด capacityCheck (ต่อจาก validate)
+await new Promise((r) => setTimeout(r, 50));
+
+await test('WP0 solverInput: ส่ง subjectId ของการสอน และ label ของคาบล็อก → ข้อความชนบอกชื่อกิจกรรม', () => {
+  const d = useDoc(firstUserCase());
+  d.locks.push({ classId: d.classes[0].id, day: 0, period: 0, label: 'ลูกเสือ' });
+  index();
+  const inp = board.solverInput(false);
+  assert.ok(inp.assignments.every((a) => a.subjectId === store.doc.assignments.find((x) => x.id === a.id).subjectId));
+  assert.ok(inp.locks.some((l) => l.label === 'ลูกเสือ'));
+  const a = d.assignments.find((x) => x.classId === d.classes[0].id);
+  const conf = validate(inp, [{ assignmentId: a.id, day: 0, period: 0 }]);
+  assert.ok(conf.some((c) => c.type === 'lock' && c.message.includes('ลูกเสือ')), JSON.stringify(conf));
+  return conf.find((c) => c.type === 'lock').message;
+});
+
+await test('WP6 ทุกเคส infeasible มี code + params (reason เดิมไม่เปลี่ยน)', () => {
+  const cases = [];
+  const d1 = clone(sample);
+  d1.assignments.push({ id: 'extra', subjectId: d1.subjects[0].id, classId: 'c11', teacherId: 't1', roomId: null, perWeek: 8, doubles: 0 });
+  cases.push(['ห้องเกิน', d1, 'CLASS_OVER']);
+  const t1 = clone(tiny); t1.teachers[1].unavailable = [];
+  for (let d = 0; d < 2; d++) for (let p = 0; p < 5; p++) t1.teachers[1].unavailable.push([d, p]);
+  cases.push(['ครูไม่ว่างทุกคาบ', t1, 'BLOCKED_TEACHER']);
+  const t2 = clone(tiny); t2.assignments[1].perWeek = 6;
+  cases.push(['ครูสอนเกิน (เพิ่มเพดานอย่างเดียวไม่พอ)', t2, 'TEACHER_OVER']);
+  cases.push(['คาบคู่คร่อมพัก', {
+    days: 1, periods: [{ type: 'class' }, { type: 'break' }, { type: 'class' }], classes: [{ id: 'c' }], teachers: [{ id: 't', maxPerDay: 6 }], rooms: [],
+    assignments: [{ id: 'x', classId: 'c', teacherId: 't', roomId: null, perWeek: 2, doubles: 1 }], locks: [], fixed: [],
+  }, 'DOUBLE_NO_SLOT']);
+  const u1 = firstUserCase(); for (const a of u1.assignments) a.teacherId = u1.teachers[0].id;
+  cases.push(['ผู้ใช้จริง: ครูคนแรกทุกวิชา', toSolverInput(u1), 'TEACHER_OVER']);
+  const u2 = firstUserCase(); for (const a of u2.assignments.filter((x) => x.classId === u2.classes[0].id)) a.perWeek += 2;
+  cases.push(['ผู้ใช้จริง: ห้องเกิน', toSolverInput(u2), 'CLASS_OVER']);
+  const u3 = firstUserCase(); for (const t of u3.teachers) t.unavailable = [...Array(5).keys()].flatMap((x) => [...Array(9).keys()].map((y) => [x, y]));
+  cases.push(['ผู้ใช้จริง: ไม่ว่างทุกช่อง', toSolverInput(u3), 'BLOCKED_TEACHER']);
+  const u4 = firstUserCase(); u4.assignments[2].classId = 'c-ถูกลบ';
+  cases.push(['ห้องที่ถูกลบ', toSolverInput(u4), 'BAD_DATA']);
+  const t3 = clone(tiny); t3.teachers[0].maxPerDay = 1;
+  cases.push(['เพดาน 1 คาบ/วัน กับคาบคู่', t3, 'TEACHER_MAX_DAY']);
+  const t4 = clone(tiny); t4.fixed = [{ assignmentId: 'a1', day: 1, period: 1 }]; t4.locks.push({ classId: 'c1', day: 1, period: 0, label: 'x' });
+  cases.push(['คาบคู่ปักหมุดครึ่งเดียว ข้างหมุดติดล็อก', t4, 'DOUBLE_NO_SLOT']);
+  const lines = [];
+  for (const [name, inp, want] of cases) {
+    const r = solve(inp, { seed: 1, timeLimitMs: 1500 });
+    assert.ok(r.unplaced.length > 0, name);
+    assertCoded(r);
+    assert.ok(r.unplaced.some((u) => u.code === want), `${name}: ต้องมี ${want} ได้ ${r.unplaced.map((u) => u.code)}`);
+    lines.push(`${name}: ${[...new Set(r.unplaced.map((u) => u.code))].join(', ')}`);
+  }
+  const pinned = cases.at(-1)[1];
+  assert.ok(solve(pinned, { seed: 1, timeLimitMs: 500 }).unplaced.some((u) => u.params.pinnedHalf), 'คู่หูหมุดต้องมี pinnedHalf');
+  return lines.join('\n    ');
+});
+
+/** 3 ห้อง 5 วัน 6 คาบ ครู t1 สอนห้องละ 4 คาบ (12) แต่สอนได้วันละ 2 (10) */
+function maxDayCase() {
+  return {
+    days: 5, periods: Array(6).fill({ type: 'class' }), classes: [{ id: 'c1' }, { id: 'c2' }, { id: 'c3' }],
+    teachers: [{ id: 't1', name: 'ครูหนึ่ง', maxPerDay: 2 }, { id: 't2', maxPerDay: 6 }], rooms: [],
+    assignments: [1, 2, 3].map((i) => ({ id: 'm' + i, subjectId: 's1', classId: 'c' + i, teacherId: 't1', perWeek: 4 }))
+      .concat([1, 2, 3].map((i) => ({ id: 'n' + i, subjectId: 's2', classId: 'c' + i, teacherId: 't2', perWeek: 2 }))),
+    locks: [], fixed: [],
+  };
+}
+await test('WP6 TEACHER_MAX_DAY.params.minNeeded ถูกต้อง: ตั้งค่านั้นแล้วจัดครบ ค่าน้อยกว่าไม่พอ', () => {
+  const inp = maxDayCase();
+  const r = solve(inp, { seed: 1, timeLimitMs: 1000 });
+  const u = r.unplaced.find((x) => x.code === 'TEACHER_MAX_DAY');
+  assert.ok(u, JSON.stringify(r.unplaced));
+  assert.match(u.reason, /ต้องสอน 12 คาบ\/สัปดาห์ แต่สอนได้สูงสุด 10 คาบ/);
+  assert.deepEqual(u.params, { teacherId: 't1', maxPerDay: 2, minNeeded: 3, need: 12, free: 10 });
+  const ok = clone(inp); ok.teachers[0].maxPerDay = u.params.minNeeded;
+  const r2 = solve(ok, { seed: 1, timeLimitMs: 2000 });
+  assert.equal(r2.unplaced.length, 0, JSON.stringify(r2.unplaced));
+  assert.equal(r2.stats.hardViolations, 0);
+  // ครูไม่ว่างบางวัน: ต้องเพิ่มเพดานมากขึ้น (วันที่ไม่ว่างไม่ช่วย)
+  const busy = clone(inp); busy.teachers[0].unavailable = [...Array(6).keys()].flatMap((p) => [[0, p], [1, p]]);
+  const ub = solve(busy, { seed: 1, timeLimitMs: 1000 }).unplaced.find((x) => x.code === 'TEACHER_MAX_DAY');
+  assert.equal(ub.params.minNeeded, 4); // 3 วัน × 4 = 12
+  const ok2 = clone(busy); ok2.teachers[0].maxPerDay = 4;
+  assert.equal(solve(ok2, { seed: 1, timeLimitMs: 2000 }).unplaced.length, 0);
+  // ไม่ว่างจนเพิ่มเพดานอย่างเดียวไม่พอ → TEACHER_OVER
+  const full = clone(inp); full.teachers[0].unavailable = [...Array(6).keys()].flatMap((p) => [[0, p], [1, p], [2, p], [3, p]]);
+  const uf = solve(full, { seed: 1, timeLimitMs: 1000 }).unplaced.find((x) => x.params.teacherId === 't1');
+  assert.equal(uf.code, 'TEACHER_OVER');
+  assert.deepEqual(uf.params, { teacherId: 't1', need: 12, free: 2, maxPerDay: 2, unavail: 24 });
+});
+
+await test('WP6 capacityCheck ให้ตัวเลขและข้อความเท่า solve().unplaced ในเคสความจุ', () => {
+  const d1 = clone(sample);
+  d1.assignments.push({ id: 'extra', subjectId: d1.subjects[0].id, classId: 'c11', teacherId: 't1', roomId: null, perWeek: 8, doubles: 0 });
+  const u2 = firstUserCase(); for (const a of u2.assignments) a.teacherId = u2.teachers[0].id;
+  const rm = clone(tiny); rm.assignments[2].perWeek = 9; // r1 ใช้ 2 + 9 = 11 > 8 ช่อง
+  for (const inp of [d1, toSolverInput(u2), maxDayCase(), rm]) {
+    const r = solve(inp, { seed: 1, timeLimitMs: 1500 });
+    const cc = capacityCheck(inp).issues;
+    for (const u of r.unplaced.filter((x) => /OVER|MAX_DAY/.test(x.code) && !x.code.startsWith('CROWDED'))) {
+      const hit = cc.find((x) => x.code === u.code && JSON.stringify(x.params) === JSON.stringify(u.params));
+      assert.ok(hit, `capacityCheck ไม่มี ${u.code} ${JSON.stringify(u.params)} · มี ${JSON.stringify(cc)}`);
+      assert.equal(hit.text, u.reason);
+    }
+  }
+  assert.ok(capacityCheck(rm).issues.some((x) => x.code === 'ROOM_OVER' && x.params.need === 11 && x.params.free === 8));
+  assert.deepEqual(capacityCheck(sample).issues, []);
+});
+
+await test('WP6 capacityCheck กับ input ว่าง/เสีย/อ้าง id ที่ถูกลบ → ไม่ throw', () => {
+  for (const x of [null, undefined, {}, [], 'x', { days: 5, periods: [] }, { days: 0, periods: [{ type: 'class' }], classes: [{ id: 1 }] },
+    { days: 5, periods: [{ type: 'class' }], classes: [null], teachers: [null], assignments: [null, {}, { id: 'a', classId: 'nope', perWeek: 3 }] }]) {
+    const r = capacityCheck(x);
+    assert.ok(Array.isArray(r.issues));
+  }
+  const bad = clone(tiny);
+  bad.assignments.push({ id: 'z1', classId: 'ลบแล้ว', teacherId: 't1', perWeek: 2 }, { id: 'z2', classId: 'c1', teacherId: 'ลบแล้ว', perWeek: 1 },
+    { id: 'z3', classId: 'c2', teacherId: null, perWeek: 1 }, { id: 'z4', classId: 'c2', teacherId: 't2', roomId: 'ลบแล้ว', perWeek: 1 });
+  bad.fixed = [{ assignmentId: 'ไม่มี', day: 0, period: 0 }, { assignmentId: 'a1', day: 9, period: 9 }];
+  bad.locks.push({ classId: 'ลบแล้ว', day: 0, period: 0 });
+  const codes = capacityCheck(bad).issues.map((x) => x.code);
+  assert.ok(codes.includes('BAD_DATA') && codes.includes('NO_TEACHER'), codes.join());
+  assertCoded(solve(bad, { seed: 1, timeLimitMs: 300 }));
+});
+
+await test('WP6 readiness ใช้ capacityCheck: ครูภาระเกิน → ปุ่ม "เพิ่มเป็น 7" → แก้แล้วพร้อมจัด จัดครบ → เลิกทำคืนค่า 6', () => {
+  const d = firstUserCase();
+  const t = d.teachers[0];
+  t.maxPerDay = 6;
+  // ให้ครูคนแรกรับแถวของครูคนที่สองเพิ่ม จนต้องสอนเกิน 30 คาบ (5 วัน × 6) แต่ไม่เกิน 35
+  const mine = () => d.assignments.filter((a) => a.teacherId === t.id).reduce((s, a) => s + a.perWeek, 0);
+  for (const a of d.assignments) if (a.teacherId !== t.id && mine() <= 30 && mine() + a.perWeek <= 33) a.teacherId = t.id;
+  useDoc(d);
+  const need = mine();
+  assert.ok(need > 30 && need <= 35, `ภาระ ${need}`);
+  const issues = board.readiness();
+  const it = issues.find((x) => x.code === 'TEACHER_MAX_DAY' && x.params.teacherId === t.id);
+  assert.ok(it, JSON.stringify(issues));
+  assert.match(it.text, /รวมคาบไม่ว่างและเพดานต่อวัน/, 'ต้องเป็นข้อความจาก capacityCheck (solver โหลดแล้ว)');
+  const acts = board.fixActions(it.code, it.params);
+  const fix = acts.find((a) => a.label === 'เพิ่มเป็น 7');
+  assert.ok(fix, acts.map((a) => a.label).join());
+  const res = fix.run(store.doc); index();
+  assert.equal(t.maxPerDay, 7);
+  assert.ok(!board.readiness().some((x) => x.params?.teacherId === t.id), 'แก้แล้วต้องไม่ขึ้นปัญหาครูคนนี้');
+  const r = solve(board.solverInput(true), { seed: 3, timeLimitMs: 4000 });
+  assert.ok(!r.unplaced.some((u) => idx2(u) === t.id), JSON.stringify(r.unplaced.slice(0, 2)));
+  res.undo(store.doc); index();
+  assert.equal(t.maxPerDay, 6);
+  return `ภาระ ${need} คาบ · "${it.fix}" · จัดหลังแก้ ค้าง ${r.stats.unplacedPeriods} คาบ`;
+  function idx2(u) { return store.doc.assignments.find((a) => a.id === u.assignmentId)?.teacherId; }
+});
+
+await test('WP6 ปุ่มแก้: เพิ่ม 1 คาบ/วัน (ห้องเกิน) · ลดคาบคู่ · แบ่งวิชาให้ครูอื่น · ไปเติมครู — ทุกปุ่มเลิกทำได้', () => {
+  // ห้องเกิน → เพิ่มคาบท้ายวัน (ต่อเวลาจากคาบสุดท้าย) แล้วเลิกทำ
+  const d = firstUserCase();
+  for (const a of d.assignments.filter((x) => x.classId === d.classes[0].id)) a.perWeek += 1;
+  d.term.periods.forEach((p, i) => { p.start = `${String(8 + i).padStart(2, '0')}:00`; p.end = `${String(9 + i).padStart(2, '0')}:00`; });
+  useDoc(d);
+  const co = board.readiness().find((x) => x.code === 'CLASS_OVER');
+  assert.ok(co);
+  const add = board.fixActions(co.code, co.params).find((a) => a.run);
+  assert.match(add.label, /เพิ่ม 1 คาบ\/วัน/);
+  const n0 = d.term.periods.length;
+  const r1 = add.run(store.doc); index();
+  assert.equal(d.term.periods.length, n0 + 1);
+  assert.deepEqual(d.term.periods.at(-1), { label: '9', start: '17:00', end: '18:00', type: 'class' });
+  assert.ok(!board.readiness().some((x) => x.code === 'CLASS_OVER'), 'เพิ่มคาบแล้วห้องต้องพอ');
+  r1.undo(store.doc); index();
+  assert.equal(d.term.periods.length, n0);
+  assert.ok(board.fixActions('CLASS_OVER', co.params).some((a) => a.go?.tab === 'periods'));
+
+  // คาบคู่ไม่พอ → ลดคาบคู่ของแถวนั้น
+  const dd = firstUserCase();
+  const a0 = dd.assignments.find((x) => x.classId === dd.classes[0].id && x.perWeek >= 4);
+  a0.doubles = 2;
+  useDoc(dd);
+  const red = board.fixActions('DOUBLE_NO_SLOT', { classId: a0.classId, doubles: 2, slots: 1 }, { assignmentIds: [a0.id] })[0];
+  assert.match(red.label, /จาก 2 → 1/);
+  const r2 = red.run(store.doc);
+  assert.equal(a0.doubles, 1);
+  r2.undo(store.doc);
+  assert.equal(a0.doubles, 2);
+
+  // ครูสอนเกิน (เพิ่มเพดานไม่พอ) → แบ่งวิชาที่คาบมากสุดให้ครูอื่น · เลิกทำคืนแถวเดิม
+  const ds = firstUserCase();
+  useDoc(ds);
+  const tid = ds.teachers[0].id;
+  const before = JSON.stringify(ds.assignments);
+  const acts = board.fixActions('TEACHER_OVER', { teacherId: tid, need: 40, free: 30, maxPerDay: 6, unavail: 0 });
+  assert.ok(acts.some((a) => a.go?.section === 'teachers' && a.go.teacherId === tid));
+  const sp = acts.find((a) => a.run);
+  assert.ok(sp && /ให้ครูอื่น/.test(sp.label), acts.map((a) => a.label).join());
+  const n1 = ds.assignments.length;
+  const r3 = sp.run(store.doc); index();
+  assert.equal(ds.assignments.length, n1 + 1);
+  assert.ok(ds.assignments.some((a) => a.split && a.teacherId !== tid));
+  r3.undo(store.doc); index();
+  assert.equal(JSON.stringify(ds.assignments), before);
+
+  // แถวยังไม่มีครู → ปุ่มพาไปแท็บการสอน กรองแถวว่าง
+  const dn = firstUserCase();
+  dn.assignments[0].teacherId = null; dn.assignments[1].teacherId = null;
+  useDoc(dn);
+  const nt = board.readiness().find((x) => x.code === 'NO_TEACHER');
+  assert.ok(nt);
+  const g = board.fixActions('NO_TEACHER', nt.params)[0];
+  assert.deepEqual(g.go, { tab: 'data', section: 'assignments', filter: 'noTeacher' });
+  assert.equal(g.label, 'ไปเติมครู (2 แถว)');
+});
+
+await test('WP6 readiness ไม่ช้า: 36 ห้อง ≤ 5 ms ต่อครั้ง', () => {
+  const big = scaled(3);
+  big.placements = [];
+  useDoc(big);
+  for (let i = 0; i < 5; i++) board.readiness();
+  const times = [];
+  for (let i = 0; i < 20; i++) { const t = now(); board.readiness(); times.push(now() - t); }
+  times.sort((x, y) => x - y);
+  const med = times[10];
+  assert.ok(med < 5, `median ${med.toFixed(2)} ms`);
+  return `median ${med.toFixed(2)} ms · max ${times.at(-1).toFixed(2)} ms`;
 });
 
 // ── สรุปข้อมูลตัวอย่าง ────────────────────────────────────────────────────

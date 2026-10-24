@@ -25,4 +25,11 @@ return [
 
     // ผู้ดูแลระบบที่เปิดหน้า admin.php ได้ (ต้องล็อกอินด้วย Google ด้วยอีเมลเหล่านี้) · ไม่ใส่ = ใช้ค่าเริ่มต้นในโค้ด
     // 'admin_emails' => ['sricodeboon@gmail.com', 'dev.nathom@gmail.com'],
+
+    // กล่อง "เลี้ยงโอวัลตินครูแจ็กสักแก้ว" (พร้อมเพย์) · ไม่ใส่คีย์ = ใช้ค่าเริ่มต้นในโค้ด (lib/layout.php) · ตั้ง promptpay เป็น '' = ปิดกล่อง
+    // รูป QR ใน assets/brand/promptpay-qr.* เป็นของเบอร์ 0930732896 เท่านั้น ใส่เบอร์อื่นจะแสดงแค่เบอร์ + ปุ่มคัดลอก
+    'donate' => ['promptpay' => '0930732896', 'name' => 'รัชเดช ศรีแก้ว'],
+
+    // ช่องทางติดต่อ (ใต้ฟอร์มข้อเสนอแนะ + ท้ายหน้า) · ตั้งเป็น '' = ไม่แสดงช่องนั้น
+    'contact' => ['facebook' => 'https://www.facebook.com/sricodeboon', 'email' => 'sricodeboon@gmail.com'],
 ];

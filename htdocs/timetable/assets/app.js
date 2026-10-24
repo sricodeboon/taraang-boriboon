@@ -1,5 +1,5 @@
 // ตัวควบคุมหลัก: โหลด/บันทึกภาคเรียน, แท็บ, สถานะบันทึก
-import { store, index, merge3, esc } from './store.js';
+import { store, index, merge3, esc, remaining, noTeacher as noTch } from './store.js';
 import * as notify from './notify.js';
 import * as board from './board.js';
 import * as data from './data.js';
@@ -43,7 +43,71 @@ export async function refreshCsrf() {
 function renderTab() {
   document.querySelectorAll('.tabs [data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
   for (const k of Object.keys(TABS)) $('#tab-' + k).hidden = k !== tab;
-  if (store.doc) TABS[tab].render($('#tab-' + tab));
+  // finally: แท็บพังกับข้อมูลเก่าที่ไม่คาดไว้ → ยังแสดง <main> (.tt-ready) ให้สลับแท็บ/ส่งออกไฟล์สำรองได้ ไม่ใช่จอว่าง
+  // .tt-ready ใส่ในงาน JS เดียวกับที่วาดแถบขั้นตอน (ยังไม่ paint ระหว่างกัน) จึงไม่เกิด CLS
+  try { if (store.doc) TABS[tab].render($('#tab-' + tab)); } finally { if (store.doc) $('#app').classList.add('tt-ready'); renderSteps(); }
+}
+
+// ---------- แถบขั้นตอน 1-2-3-4 (ครู → ใครสอนอะไร → ตรวจ → จัด) ----------
+// อ่านสถานะจากเอกสารทุกครั้ง ไม่เก็บ state เพิ่ม · ภาคเรียนว่าง = มีปุ่ม "เริ่มด้วยตัวช่วย" (wizard.js โหลดเมื่อใช้)
+let wizardMod = null;
+const wizard = () => (wizardMod ??= import('./wizard.js').catch((e) => { wizardMod = null; throw e; }));
+const blankDoc = (d) => !!d && !d.classes.length && !d.teachers.length && !d.assignments.length;
+async function openWizard(auto) {
+  try { const w = await wizard(); auto ? w.maybeOpen() : w.open(); } catch (e) { if (!auto) notify.error('เปิดตัวช่วยไม่สำเร็จ: ' + e.message); }
+}
+const STEP_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>';
+function stepState(d) {
+  const asg = d.assignments;
+  const noTeacher = asg.filter(noTch).length;
+  const left = asg.reduce((n, a) => n + remaining(a), 0);
+  let issues = 0;
+  try { issues = board.readiness().length; } catch { /* ข้อมูลยังไม่ครบ */ }
+  const s1 = d.teachers.length > 0, s2 = s1 && asg.length > 0 && !noTeacher, s4 = s2 && !!d.placements.length && !left;
+  return [
+    { n: 1, t: 'ครู', done: s1, go: { tab: 'data', section: 'teachers' }, tip: s1 ? `ครู ${d.teachers.length} คน` : 'เพิ่มครู หรือวางรายชื่อครู' },
+    { n: 2, t: 'ใครสอนอะไร', done: s2, go: { tab: 'data', section: 'assignments', ...(noTeacher && s1 ? { filter: 'noTeacher' } : {}) }, tip: !asg.length ? 'ยังไม่มีการสอน' : noTeacher ? `ยังไม่มีครู ${noTeacher} แถว` : `การสอน ${asg.length} แถว ครบทุกแถว`, badge: noTeacher && asg.length ? noTeacher : 0 },
+    { n: 3, t: 'ตรวจ', done: s2 && (s4 || !issues), go: { tab: 'board' }, tip: !s2 ? 'ทำขั้น 1–2 ให้ครบก่อน' : issues ? `พบ ${issues} จุดที่ทำให้จัดไม่ครบ` : 'ข้อมูลพร้อมจัด', badge: s2 ? issues : 0 },
+    { n: 4, t: 'จัด', done: s4, go: { tab: 'board' }, tip: s4 ? 'จัดครบทุกคาบแล้ว' : `เหลือจัด ${left} คาบ` },
+  ];
+}
+function renderSteps() {
+  let nav = $('#tt-steps');
+  if (!nav) {
+    stepsCss();
+    nav = Object.assign(document.createElement('nav'), { id: 'tt-steps', className: 'tt-steps' });
+    nav.setAttribute('aria-label', 'ขั้นตอนการจัดตาราง');
+    $('.tabs').after(nav);
+    nav.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-step]');
+      if (b) document.dispatchEvent(new CustomEvent('tt:goto', { detail: JSON.parse(b.dataset.step) }));
+    });
+  }
+  const d = store.doc;
+  if (!d) { nav.hidden = true; return; }
+  nav.hidden = false;
+  $('#app').classList.add('tt-ready'); // แสดง <main> พร้อมแถบขั้นตอน/ครูบูรณ์ในเฟรมเดียวกัน (board.css) ไม่ให้เนื้อหาถูกดันลง (CLS)
+  const steps = stepState(d);
+  const cur = steps.find((s) => !s.done)?.n || 0;
+  nav.innerHTML = `<ol>${steps.map((s) => `<li><button type="button" class="${s.done ? 'done' : s.n === cur ? 'cur' : ''}" data-step="${esc(JSON.stringify(s.go))}" title="${esc(s.tip)}" ${s.n === cur ? 'aria-current="step"' : ''}>
+      <span class="n">${s.done ? STEP_ICON : s.n}</span>${s.t}${s.badge ? ` <span class="b" aria-label="${esc(s.tip)}">${s.badge}</span>` : ''}</button></li>`).join('')}</ol>
+    ${blankDoc(d) ? '<button type="button" class="btn btn-sm btn-primary" data-open-wizard>เริ่มด้วยตัวช่วย 4 คำถาม</button>' : ''}`;
+}
+// สไตล์แถบขั้นตอน (ใส่ครั้งเดียว · ใช้ตัวแปรสีของ app.css: เสร็จ = น้ำเงิน, ขั้นปัจจุบัน = ทอง · ไม่มีแถบสีขอบซ้าย)
+function stepsCss() {
+  const s = document.createElement('style');
+  s.textContent = `.tt-steps{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 16px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.tt-steps[hidden]{display:none}
+.tt-steps ol{display:flex;gap:4px;margin:0;padding:0;list-style:none;flex-wrap:wrap}
+.tt-steps li{display:flex;align-items:center}.tt-steps li+li::before{content:"";width:14px;height:1px;background:var(--line);margin-right:4px}
+.tt-steps ol button{display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;background:none;border-radius:999px;padding:3px 10px 3px 4px;cursor:pointer;color:var(--muted);font:inherit;font-size:.88rem;min-height:32px}
+.tt-steps ol button:hover{border-color:var(--line);background:var(--surface)}
+.tt-steps .n{width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;border:1px solid var(--line);background:var(--surface);font-size:.78rem;font-weight:600}
+.tt-steps .done{color:var(--ink)}.tt-steps .done .n{background:var(--blue);border-color:var(--blue);color:var(--surface)}
+.tt-steps .cur{color:var(--ink);font-weight:600;border-color:var(--gold-bg);background:var(--gold-soft)}.tt-steps .cur .n{border-color:var(--gold-bg);background:var(--gold-bg);color:#0F2438}
+.tt-steps .b{min-width:18px;padding:0 5px;border-radius:999px;background:var(--gold-soft);border:1px solid var(--gold-bg);color:var(--ink);font-size:.72rem;line-height:16px;text-align:center}
+@media (max-width:560px){.tt-steps{padding:6px 12px;gap:6px}.tt-steps li+li::before{width:6px}.tt-steps ol button{padding:2px 8px 2px 3px;font-size:.84rem}}`;
+  document.head.appendChild(s);
 }
 
 function renderTermSelect() {
@@ -68,6 +132,8 @@ async function loadTerm(id) {
   renderTab();
   await restoreDraft(t);
   if (!isDirty()) saveState('บันทึกแล้ว', 'ok');
+  // ภาคเรียนว่าง (ไม่มีห้อง ครู การสอน) → เปิดตัวช่วยเริ่มต้นเอง (ยกเว้นเคยกด "ไว้ทีหลัง" ของภาคเรียนนี้)
+  if (blankDoc(store.doc)) openWizard(true);
 }
 
 async function refreshTerms(selectId) {
@@ -89,7 +155,7 @@ async function refreshTerms(selectId) {
 // · ซ่อนแท็บ/สลับแอป = ส่งทันที · ปิดหน้า = ส่งแบบ keepalive · ถ้าส่งไม่ทัน ฉบับร่างจะถูกกู้คืนตอนเปิดครั้งหน้า
 const IDLE_MS = 3000, MIN_GAP_MS = 30000, MAX_WAIT_MS = 90000, KEEPALIVE_MAX = 60000; // KEEPALIVE_MAX นับเป็นไบต์ UTF-8 (เบราว์เซอร์จำกัด 64KB · ไทย 1 ตัว = 3 ไบต์)
 const utf8Bytes = (s) => new TextEncoder().encode(s).length;
-const URGENT = new Set(['solve', 'import', 'clear']); // การเปลี่ยนแปลงก้อนใหญ่ ส่งเร็วโดยไม่รอ MIN_GAP
+const URGENT = new Set(['solve', 'import', 'clear', 'wizard']); // การเปลี่ยนแปลงก้อนใหญ่ ส่งเร็วโดยไม่รอ MIN_GAP
 let saveTimer = null, savePromise = null, draftTimer = null;
 let savedText = '';            // JSON ของเอกสารฉบับที่เซิร์ฟเวอร์มีแล้ว = ฐานสำหรับเทียบ "เปลี่ยนไหม" และรวมการแก้ไขเมื่อชน (409)
 let firstDirtyAt = 0, lastChangeAt = 0, lastSaveAt = 0, urgent = false, retryMs = 0;
@@ -98,6 +164,7 @@ const isDirty = () => !!store.doc && JSON.stringify(store.doc) !== savedText;
 
 store.onChange((reason) => {
   TABS[tab].render($('#tab-' + tab));
+  renderSteps();
   if (!isDirty()) { if (!savePromise) markClean(store.termId); return; } // กดแล้วเนื้อหาเท่าเดิม (เช่น ล็อกแล้วปลด) ไม่ต้องส่ง
   const now = Date.now();
   if (!firstDirtyAt) firstDirtyAt = now;
@@ -183,12 +250,12 @@ function markClean(termId) {
 // ---------- ชนกัน (409): รวมการแก้ไขอัตโนมัติรายหมวด ----------
 // เดิมถามแค่ "โหลดใหม่ (ของเราหาย) / บันทึกทับ (ของอีกที่หาย)" → เปิดสองแท็บแล้วกด Cancel ทำตารางที่จัดไว้หายทั้งหมดได้
 // ตอนนี้เทียบ 3 ทาง (ฐาน = ฉบับที่บันทึกล่าสุดของหน้านี้, ของเรา, ของเซิร์ฟเวอร์) รายหมวด: แก้ฝั่งเดียว = เอาฝั่งนั้น, แก้ทั้งสองฝั่ง = ถาม
-const PART_NAMES = { term: 'ชื่อภาคเรียน/โครงคาบ', classes: 'ห้องเรียน', teachers: 'ครู', rooms: 'ห้องพิเศษ', subjects: 'วิชา', assignments: 'การสอน', locks: 'คาบล็อก', placements: 'ตารางที่จัดไว้' };
+const PART_NAMES = { term: 'ชื่อภาคเรียน/โครงคาบ', classes: 'ห้องเรียน', teachers: 'ครู', rooms: 'ห้องพิเศษ', subjects: 'วิชา', assignments: 'การสอน', locks: 'คาบล็อก', placements: 'ตารางที่จัดไว้', settings: 'ค่าตั้งของภาคเรียน', meta: 'ผลจัดล่าสุด' };
 /** รวมแล้วถามเฉพาะเมื่อชนจริง คืนเอกสารที่รวมแล้ว */
 async function mergeAsk(base, mine, theirs, intro) {
   let { merged, clashes } = merge3(base, mine, theirs);
   if (clashes.length) {
-    const names = clashes.map((k) => PART_NAMES[k] || k).join(', ');
+    const names = clashes.map((k) => PART_NAMES[k] || 'ข้อมูลอื่น').join(', '); // ไม่ให้ชื่อคีย์ภาษาอังกฤษขึ้นจอ
     const pick = await notify.choose({
       title: 'มีการแก้ไขจากสองที่พร้อมกัน', icon: 'warning',
       html: `<p style="margin:0">${esc(intro)}</p><p style="margin:8px 0 0">ส่วนที่ถูกแก้ทั้งสองที่ (รายการเดียวกัน): <b>${esc(names)}</b><br><span class="muted">ส่วนอื่นรวมให้อัตโนมัติแล้ว</span></p><p style="margin:8px 0 0">ในรายการที่ชน จะใช้ฉบับไหน</p>`,
@@ -344,12 +411,16 @@ $('#term-select').addEventListener('change', async (e) => {
   await loadTerm(+e.target.value);
 });
 
-// ปุ่ม "ไปแก้ที่…" / "ไปจัดตาราง" จากโมดูลอื่น
+// ปุ่ม "ไปแก้ที่…" / "ไปจัดตาราง" / แถบขั้นตอน จากโมดูลอื่น
+// detail: { tab, section?, filter? ('noTeacher'), teacherId?, classId? (แท็บโครงคาบ: เลือกห้องในตัวเลือกคาบล็อก) }
 document.addEventListener('tt:goto', (e) => {
-  const { tab: t, section } = e.detail || {};
-  if (section) data.setSection(section);
+  const { tab: t, section, filter, teacherId, classId } = e.detail || {};
+  if (section) data.setSection(section, { filter, teacherId });
+  if (t === 'periods' && classId) periods.setLockClass(classId);
   if (t && TABS[t]) { tab = t; sessionSet('tab', tab); renderTab(); window.scrollTo({ top: 0 }); }
 });
+// ปุ่ม [data-open-wizard] ที่ไหนก็ได้ในหน้า (แถบขั้นตอน / board / periods) = เปิดตัวช่วยเริ่มต้น
+document.addEventListener('click', (e) => { if (e.target.closest?.('[data-open-wizard]')) openWizard(false); });
 // คลิกสถานะ = บันทึกทันที
 $('#save-state').title = 'บันทึกอัตโนมัติ (เก็บในเครื่องทันที ส่งขึ้นระบบทุก ~30 วินาทีขณะแก้ไข) · คลิกเพื่อบันทึกทันที';
 $('#save-state').style.cursor = 'pointer';
@@ -367,7 +438,7 @@ document.querySelector('form[action="auth/logout.php"]')?.addEventListener('subm
 });
 
 if (window.TT.flash) (window.TT.flashKind === 'ok' ? notify.ok : window.TT.flashKind === 'info' ? notify.info : notify.warn)(window.TT.flash, 6000);
-refreshTerms().catch((e) => { saveState('โหลดไม่สำเร็จ', 'warn'); notify.error('โหลดข้อมูลไม่สำเร็จ: ' + e.message); });
+refreshTerms().catch((e) => { $('#app').classList.add('tt-ready'); saveState('โหลดไม่สำเร็จ', 'warn'); notify.error('โหลดข้อมูลไม่สำเร็จ: ' + e.message); });
 
 // ออฟไลน์/กลับมาออนไลน์: บอกสถานะ และส่งที่ค้างทันทีเมื่อเน็ตกลับมา
 let offline = false;

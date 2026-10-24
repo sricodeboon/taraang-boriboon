@@ -60,5 +60,26 @@ test('ไม่มีฉบับฐาน (ข้อมูลเก่า) → 
   assert.deepEqual(clashes, ['teachers']);
 });
 
+test('กดจัดทั้งสองที่ ได้ตารางเดียวกัน → meta.lastSolve/solveSeed ไม่ถาม ใช้ผลจัดที่ใหม่กว่า', () => {
+  const b0 = { ...clone(base), settings: { maxDoubles: 1 }, meta: { setup: { wizardAt: 'x' } } };
+  const pl = [{ assignmentId: 'a1', day: 0, period: 0 }];
+  const theirs = clone(b0); theirs.placements = pl; theirs.settings.solveSeed = 11; theirs.meta.lastSolve = { at: '2026-10-24T01:00:00.000Z', placed: 1 };
+  const mine = clone(b0); mine.placements = clone(pl); mine.settings.solveSeed = 22; mine.meta.lastSolve = { at: '2026-10-24T02:00:00.000Z', placed: 1 };
+  const before = JSON.stringify(mine);
+  const { merged, clashes } = merge3(b0, mine, theirs);
+  assert.deepEqual(clashes, []);
+  assert.equal(merged.meta.lastSolve.at, '2026-10-24T02:00:00.000Z');
+  assert.equal(merged.meta.setup.wizardAt, 'x');
+  assert.equal(merged.settings.solveSeed, 11);
+  assert.equal(JSON.stringify(mine), before, 'ไม่แก้ object ของผู้เรียก');
+});
+
+test('settings ต่างกันมากกว่า solveSeed → ยังนับว่าชน', () => {
+  const b0 = { ...clone(base), settings: { maxDoubles: 1 } };
+  const theirs = clone(b0); theirs.settings.maxDoubles = 2; theirs.settings.solveSeed = 1;
+  const mine = clone(b0); mine.settings.maxDoubles = 3; mine.settings.solveSeed = 2;
+  assert.deepEqual(merge3(b0, mine, theirs).clashes, ['settings']);
+});
+
 console.log(`\nผ่าน ${passed} / ${passed + failed}`);
 if (failed) process.exit(1);

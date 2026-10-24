@@ -51,7 +51,9 @@ function admin_summary(): array {
                       [$d1, ...$admArgs]);
     $guest = db_one("SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM users WHERE provider = 'guest'");
     $now = time();
-    $rate = db_one('SELECT SUM(at > ?) AS h1, COUNT(*) AS d1 FROM rate_hits', [$now - 3600]);
+    // นับเฉพาะถัง guest:all (1 แถวต่อการกด "ลองใช้ทันที" 1 ครั้ง) — เดิมนับทั้งตาราง = ซ้ำ 2 เท่า (มีถังต่อ IP ด้วย) และปนถัง fb: ของข้อเสนอแนะ
+    // d1 กรองเวลาเองด้วย: rate_limited() ลบแถวเก่ากว่า 1 วันเฉพาะตอนมีคนเรียก ถ้าเงียบทั้งวันแถวเก่าจะค้างอยู่
+    $rate = db_one("SELECT SUM(at > ?) AS h1, SUM(at > ?) AS d1 FROM rate_hits WHERE bucket = 'guest:all'", [$now - 3600, $now - 86400]);
 
     // ขนาดไฟล์ฐานข้อมูล (รวม -wal) · MySQL ไม่มีไฟล์ให้ดู
     $size = null;
@@ -145,7 +147,13 @@ function admin_rows(string $q, int $prio, bool $all, int $page): array {
                                 json_array_length(t.data_json, '$.subjects') AS n_sub,
                                 json_array_length(t.data_json, '$.rooms') AS n_room,
                                 (SELECT COALESCE(SUM(CAST(json_extract(j.value, '$.perWeek') AS INTEGER)), 0)
-                                   FROM json_each(t.data_json, '$.assignments') j) AS need
+                                   FROM json_each(t.data_json, '$.assignments') j) AS need,
+                                json_extract(t.data_json, '$.meta.lastSolve.at') AS ls_at,
+                                json_extract(t.data_json, '$.meta.lastSolve.mode') AS ls_mode,
+                                json_extract(t.data_json, '$.meta.lastSolve.placed') AS ls_placed,
+                                json_extract(t.data_json, '$.meta.lastSolve.need') AS ls_need,
+                                json_extract(t.data_json, '$.meta.lastSolve.unplaced') AS ls_unplaced,
+                                json_extract(t.data_json, '$.meta.lastSolve.codes') AS ls_codes
                          FROM terms t WHERE t.id IN ($tph)", $tids) as $r) {
             $stats[(int) $r['id']] = $r;
         }
@@ -157,6 +165,33 @@ function admin_rows(string $q, int $prio, bool $all, int $page): array {
     return ['rows' => $rows, 'total' => $total, 'counts' => $counts, 'page' => $page, 'pages' => $pages];
 }
 
+/**
+ * ผลจัดอัตโนมัติล่าสุดของภาคเรียน (meta.lastSolve ที่ board.js เขียนตอนจัด — อ่านอย่างเดียว ไม่แก้ schema)
+ * ภาคเรียนที่ไม่เคยจัดหลังรุ่นนี้ / ไม่มี meta → json_extract ได้ NULL → คืน null
+ * คืน ['text' => 'วางได้ x/y', 'pct', 'at' (Y-m-d H:i:s เวลาเครื่อง), 'mode' (ชื่อไทย), 'unplaced', 'codes' => string[]]
+ */
+const ADMIN_SOLVE_MODE = ['missing' => 'จัดเฉพาะที่ขาด', 'all' => 'จัดใหม่ทั้งหมด'];
+function admin_last_solve(array $r): ?array {
+    if (!isset($r['ls_placed']) && !isset($r['ls_at'])) return null;
+    $placed = max(0, (int) ($r['ls_placed'] ?? 0));
+    $need = max(0, (int) ($r['ls_need'] ?? 0));
+    $at = null;
+    if (isset($r['ls_at']) && $r['ls_at'] !== '') {
+        $ts = is_numeric($r['ls_at']) ? (int) ((float) $r['ls_at'] / 1000) : strtotime((string) $r['ls_at']);
+        if ($ts) $at = date('Y-m-d H:i:s', $ts);
+    }
+    $codes = json_decode((string) ($r['ls_codes'] ?? ''), true);
+    $codes = is_array($codes) ? array_values(array_filter($codes, fn($c) => is_string($c) && preg_match('/^[\w.-]{1,40}$/', $c))) : [];
+    return [
+        'text' => 'วางได้ ' . number_format($placed) . '/' . number_format($need),
+        'pct' => $need > 0 ? min(100, (int) floor($placed * 100 / $need)) : 0,
+        'at' => $at,
+        'mode' => ADMIN_SOLVE_MODE[(string) ($r['ls_mode'] ?? '')] ?? '',
+        'unplaced' => max(0, (int) ($r['ls_unplaced'] ?? 0)),
+        'codes' => $codes,
+    ];
+}
+
 /** จำนวนโรงเรียนจริงแยกจังหวัด/อำเภอ (ไม่นับโรงเรียนทดลองและโรงเรียนที่มีแต่บัญชีแอดมิน) */
 function admin_geo(): array {
     [$isAdm, $admArgs] = admin_sql_is_admin();
@@ -165,6 +200,61 @@ function admin_geo(): array {
                    FROM schools s
                    WHERE s.id IN (SELECT u.school_id FROM users u WHERE u.school_id IS NOT NULL AND u.provider <> 'guest' AND NOT $isAdm)
                    GROUP BY 1, 2 ORDER BY 1, 2", $admArgs);
+}
+
+// ---------- ข้อเสนอแนะ (feedback.php เขียน · admin-feedback.php อ่าน) ----------
+const FEEDBACK_KIND = ['bug' => 'ติดปัญหา', 'feature' => 'อยากได้ฟีเจอร์', 'praise' => 'ชมเชย', 'other' => 'อื่น ๆ'];
+const FEEDBACK_STATUS = ['new' => 'ใหม่', 'read' => 'อ่านแล้ว', 'replied' => 'ตอบแล้ว'];
+const FEEDBACK_PAGE_SIZE = 50;
+const FEEDBACK_KEEP_DAYS = 365; // privacy.php ข้อ 4: เก็บ 1 ปี
+
+/**
+ * จำนวนข้อความสถานะ "ใหม่" สำหรับป้าย N (app.php/admin.php เรียกเฉพาะเมื่อ is_admin — 1 query ใช้ดัชนี feedback_status_created)
+ * ตารางยังไม่มี (ฐานยังไม่ migrate) หรืออ่านไม่ได้ → 0 ไม่ให้หน้าแอปพังเพราะป้าย
+ */
+function feedback_new_count(): int {
+    try { return (int) (db_one("SELECT COUNT(*) AS n FROM feedback WHERE status = 'new'")['n'] ?? 0); }
+    catch (PDOException $e) { error_log('feedback_new_count: ' . $e->getMessage()); return 0; }
+}
+
+/** นับตามสถานะ/ชนิด (ตัวเลขบนปุ่มกรอง) · ['status' => [new => n, …], 'kind' => [bug => n, …], 'all' => n] */
+function feedback_counts(): array {
+    $out = ['status' => array_fill_keys(array_keys(FEEDBACK_STATUS), 0), 'kind' => array_fill_keys(array_keys(FEEDBACK_KIND), 0), 'all' => 0];
+    foreach (db_all('SELECT status, kind, COUNT(*) AS n FROM feedback GROUP BY status, kind') as $r) {
+        $n = (int) $r['n'];
+        $out['all'] += $n;
+        if (isset($out['status'][$r['status']])) $out['status'][$r['status']] += $n;
+        if (isset($out['kind'][$r['kind']])) $out['kind'][$r['kind']] += $n;
+    }
+    return $out;
+}
+
+/**
+ * รายการข้อความล่าสุดก่อน กรองสถานะ/ชนิด แบ่งหน้า · ชื่อโรงเรียน/ผู้ใช้ LEFT JOIN (โรงเรียนทดลองถูกลบหลัง 48 ชม. → ได้ null)
+ * @return array{rows:array,total:int,page:int,pages:int}
+ */
+function feedback_rows(string $status, string $kind, int $page): array {
+    $where = [];
+    $args = [];
+    if ($status !== '') { $where[] = 'f.status = ?'; $args[] = $status; }
+    if ($kind !== '') { $where[] = 'f.kind = ?'; $args[] = $kind; }
+    $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+    $total = (int) db_one("SELECT COUNT(*) AS n FROM feedback f $whereSql", $args)['n'];
+    $pages = max(1, (int) ceil($total / FEEDBACK_PAGE_SIZE));
+    $page = min(max(1, $page), $pages);
+    $rows = db_all("SELECT f.*, s.name AS school, s.province, u.name AS user_name, u.email AS user_email
+                    FROM feedback f
+                    LEFT JOIN schools s ON s.id = f.school_id
+                    LEFT JOIN users u ON u.id = f.user_id
+                    $whereSql
+                    ORDER BY f.created_at DESC, f.id DESC
+                    LIMIT " . FEEDBACK_PAGE_SIZE . ' OFFSET ' . (($page - 1) * FEEDBACK_PAGE_SIZE), $args);
+    return ['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages];
+}
+
+/** ลบข้อความที่เก่ากว่า FEEDBACK_KEEP_DAYS วัน → จำนวนที่ลบ */
+function feedback_purge_old(): int {
+    return db_exec('DELETE FROM feedback WHERE created_at < ?', [admin_ago(FEEDBACK_KEEP_DAYS * 86400)]);
 }
 
 // ---------- ตัวช่วยแสดงผล ----------

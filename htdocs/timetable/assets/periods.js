@@ -1,6 +1,6 @@
 // แท็บโครงคาบ · คาบล็อก · จัดการภาคเรียน
 import { store, DAY_NAMES, esc } from './store.js';
-import { gridModel } from './rules.js';
+import { gridModel, retimePeriods, periodMinutes } from './rules.js';
 import * as notify from './notify.js';
 
 let lockClass = '';       // '' = ทุกห้อง
@@ -9,10 +9,13 @@ let root = null;
 let actions = {};          // จาก app.js: newTerm, copyTerm, deleteTerm
 
 export function setActions(a) { actions = a; }
+/** เลือกห้องในตัวเลือกคาบล็อก (จาก tt:goto { tab: 'periods', classId }) */
+export function setLockClass(id) { lockClass = typeof id === 'string' ? id : ''; }
 
 export function render(el) {
   root = el;
   const d = store.doc, t = d.term;
+  if (lockClass && !d.classes.some((c) => c.id === lockClass)) lockClass = ''; // ห้องถูกลบ/สลับภาคเรียน
   el.innerHTML = `<div class="two-col">
     <div class="card" style="padding:16px;display:grid;gap:14px">
       <div><h3 style="font-size:1.05rem">ภาคเรียนและโครงคาบ</h3>
@@ -22,6 +25,9 @@ export function render(el) {
         <div class="field"><label for="term-days">วันเรียน</label>
           <select id="term-days" class="input">${[5, 6, 7].map((n) => `<option value="${n}" ${t.days === n ? 'selected' : ''}>${n} วัน (${DAY_NAMES[0]}–${DAY_NAMES[n - 1]})</option>`).join('')}</select></div>
       </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-sm" id="p-retime" title="เรียงเวลาทุกคาบต่อกันจากเวลาเริ่มคาบแรก ช่องพักคงความยาวเดิม">คำนวณเวลาใหม่จากคาบแรก</button>
+        <span class="hint">แก้เวลาคาบแรกหรือความยาวคาบ แล้วให้ระบบไล่เวลาคาบที่เหลือให้</span></div>
       <div class="scroll-x"><table class="table"><thead><tr><th>ชื่อคาบ</th><th>เริ่ม</th><th>จบ</th><th>ชนิด</th><th></th></tr></thead><tbody>
         ${t.periods.map((p, i) => `<tr>
           <td><input class="input" data-p="${i}" data-f="label" value="${esc(p.label)}" style="min-width:70px"></td>
@@ -101,6 +107,7 @@ export function render(el) {
     store.commit('term'); render(root);
   }));
 
+  el.querySelector('#p-retime').addEventListener('click', retime);
   el.querySelector('#lock-class').addEventListener('change', (e) => { lockClass = e.target.value; render(root); });
   el.querySelector('#lock-label').addEventListener('input', (e) => { lockLabel = e.target.value; });
   el.querySelectorAll('td[data-ld]').forEach((td) => td.addEventListener('click', () => {
@@ -119,6 +126,37 @@ export function render(el) {
   el.querySelector('#t-new').addEventListener('click', () => actions.newTerm?.());
   el.querySelector('#t-copy').addEventListener('click', () => actions.copyTerm?.());
   el.querySelector('#t-del').addEventListener('click', () => actions.deleteTerm?.());
+}
+
+/** ปุ่ม "คำนวณเวลาใหม่จากคาบแรก": ถามเวลาเริ่ม + นาที/คาบ → retimePeriods (คงชื่อ/ชนิด/ลำดับ ช่องพักยาวเท่าเดิม) · เลิกทำได้ */
+async function retime() {
+  const d = store.doc, t = d.term;
+  if (!t.periods.length) return;
+  const first = t.periods[0];
+  const res = await notify.form({
+    title: 'คำนวณเวลาใหม่จากคาบแรก', ok: 'คำนวณเวลา',
+    html: `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:left">
+      <div class="field"><label for="rt-start">เริ่มคาบแรก</label><input class="input mono" type="time" id="rt-start" value="${esc(first.start || '08:30')}"></div>
+      <div class="field"><label for="rt-min">นาที/คาบ</label><input class="input" type="number" inputmode="numeric" id="rt-min" min="10" max="180" value="${periodMinutes(d)?.min || 60}"></div>
+      <span class="hint" style="grid-column:1/-1">ทุกคาบเรียนยาวเท่ากัน ต่อกันไม่มีช่องว่าง · ช่องพักยาวเท่าเดิม · ชื่อคาบและคาบที่จัดไว้ไม่เปลี่ยน</span></div>`,
+    read: (r) => {
+      const start = r.querySelector('#rt-start').value, minutes = Math.floor(+r.querySelector('#rt-min').value);
+      if (!/^\d{1,2}:\d{2}$/.test(start)) return { error: 'กรุณาใส่เวลาเริ่มคาบแรก' };
+      if (!(minutes >= 10 && minutes <= 180)) return { error: 'นาที/คาบต้องอยู่ระหว่าง 10–180' };
+      return { start, minutes };
+    },
+  });
+  if (!res || store.doc !== d) return;
+  const old = t.periods.map((p) => ({ ...p }));
+  const next = retimePeriods(t.periods, res);
+  if (next.every((p, i) => p.start === old[i].start && p.end === old[i].end)) { notify.info('เวลาเรียงต่อกันอยู่แล้ว ไม่มีอะไรเปลี่ยน'); return; }
+  t.periods.splice(0, t.periods.length, ...next);
+  store.commit('term');
+  notify.action(`คำนวณเวลาใหม่แล้ว: ${next[0].start}–${next[next.length - 1].end}`, 'เลิกทำ', () => {
+    if (store.doc !== d) return;
+    t.periods.splice(0, t.periods.length, ...old);
+    store.commit('term');
+  });
 }
 
 /** ตารางคลิกล็อกคาบ ตามแนวตารางของโรงเรียน (วันเรียงลงล่าง / คาบเรียงลงล่าง) */

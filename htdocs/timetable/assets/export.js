@@ -8,10 +8,47 @@ const pdfModule = () => import('./pdf.js');
 let root = null;
 let perPage = 1, paper = 'A4';
 
+// ---------- กล่องเลี้ยงโอวัลติน + ฟอร์มข้อเสนอแนะรุ่นย่อ (app.php วาง #tt-support ไว้นอก <main>) ----------
+// ย้ายทั้งก้อนมาท้ายแท็บ (ไม่สร้างใหม่) → ปุ่มที่ home.js ผูกไว้และข้อความที่พิมพ์ค้างอยู่ครบ
+// ลิงก์ #donate / #feedback (เมนูบนหัวจอ หรือมาจากหน้าแรกตอนล็อกอินแล้ว) = เปิดแท็บส่งออกแล้วเลื่อนไปที่กล่อง
+const SUPPORT_IDS = ['donate', 'feedback'];
+let wantHash = '';
+let supportEl = null;
+const support = () => (supportEl ??= document.getElementById('tt-support')); // จำไว้ เพราะตอนย้ายถูกถอดออกจากหน้าชั่วคราว
+function supportFromHash() {
+  const id = location.hash.slice(1);
+  if (!SUPPORT_IDS.includes(id) || !support()?.querySelector('#' + id)) return;
+  wantHash = id;
+  document.dispatchEvent(new CustomEvent('tt:goto', { detail: { tab: 'export' } }));
+}
+addEventListener('hashchange', supportFromHash);
+// กดลิงก์เดิมซ้ำ (hash ไม่เปลี่ยน = ไม่มี hashchange) ก็ยังพาไป
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a[href^="#"]');
+  if (a && a.getAttribute('href') === location.hash) supportFromHash();
+});
+setTimeout(supportFromHash); // ตอนโหลดหน้า: รอ app.js ผูกตัวรับ tt:goto ก่อน (ยังไม่มีข้อมูล = แท็บส่งออกเปิดเมื่อโหลดเสร็จ)
+function placeSupport(el) {
+  const box = support();
+  if (!box) return;
+  el.append(box);
+  box.hidden = false;
+  if (!wantHash) return;
+  const target = box.querySelector('#' + wantHash);
+  wantHash = '';
+  if (target?.matches('.tt-donate')) target.querySelector('details').open = true;
+  if (!target) return;
+  // หัวกล่องต้องพ้นแถบหัวจอที่ติดด้านบน (มือถือแถบหัวสูง) · scroll-margin ใช้กับ home.js ที่เลื่อนตาม hash ด้วย
+  const bar = document.querySelector('.bar');
+  for (const id of SUPPORT_IDS) box.querySelector('#' + id)?.style.setProperty('scroll-margin-top', (bar?.offsetHeight || 0) + 12 + 'px');
+  requestAnimationFrame(() => { target.scrollIntoView({ block: 'start' }); });
+}
+
 export function render(el) {
   root = el;
   const d = store.doc;
   const o = orientation(d);
+  support()?.remove(); // เอาออกก่อน innerHTML ใหม่ ไม่งั้นกล่องถูกลบทิ้งไปกับเนื้อหาเดิม
   el.innerHTML = `<div class="card export-orient">
       <div><b>แนวตารางรายห้อง / รายครู</b>
         <p class="muted" style="margin:2px 0 0;font-size:.88rem">${o === 'days' ? 'วันเรียงลงล่าง: แถว = วัน (จันทร์–ศุกร์) คอลัมน์ = คาบ' : 'คาบเรียงลงล่าง: แถว = คาบ คอลัมน์ = วัน'} · ใช้กับกระดานจัดตาราง PDF และ Excel (ตารางรวมทั้งโรงเรียนเป็น แถว = ห้อง/ครู เสมอ)</p></div>
@@ -66,6 +103,7 @@ export function render(el) {
   el.querySelectorAll('[data-pdf]').forEach((b) => b.addEventListener('click', () => exportPdf(b)));
   el.querySelector('#b-save').addEventListener('click', backup);
   el.querySelector('#b-load').addEventListener('change', restore);
+  placeSupport(el);
 }
 
 // ---------- Excel (ExcelJS: มีเส้นตาราง สีวิชา โลโก้ และตั้งหน้ากระดาษพร้อมพิมพ์) ----------

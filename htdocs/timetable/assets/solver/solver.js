@@ -3,9 +3,10 @@
  *
  * JavaScript ล้วน ไม่มี dependency ใช้ได้ทั้งในเบราว์เซอร์ (Web Worker / main thread) และ node >= 18
  *
- *   import { solve, validate, score } from './solver.js';
+ *   import { solve, validate, score, capacityCheck } from './solver.js';
  *   const result = solve(input, { timeLimitMs: 4000, seed: 1, onProgress });
  *   const conflicts = validate(input, placements);   // ใช้ไฮไลต์ช่องชนตอนลากวาง
+ *   const { issues } = capacityCheck(input);          // ตรวจความจุเร็วก่อนจัด (รหัส code/params ชุดเดียวกับ unplaced)
  *
  * รูปแบบ input ตาม "สัญญา Solver" ใน SPEC.md
  * (รับไฟล์รูปแบบ sample-school.json ตรง ๆ ได้ด้วย — ดู toSolverInput)
@@ -431,34 +432,13 @@ export function score(input, placements) {
 // solve
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * จัดตารางอัตโนมัติ
- * @param {object} input  ตามสัญญา Solver ใน SPEC.md
- * @param {object} [options]
- * @param {number} [options.timeLimitMs=4000]  เวลาสูงสุด (หยุดเร็วกว่านั้นเมื่อไม่พบการปรับปรุงแล้ว)
- * @param {number} [options.seed=1]            seed ของตัวสุ่ม (ค่าเดิม = ผลเดิม)
- * @param {number} [options.maxIterations]     เพดานจำนวนรอบ (ไม่บังคับ)
- * @param {number} [options.effort=1]          ตัวคูณความพยายามช่วงขัดเกลา soft (0.2–5)
- * @param {(p:{pct:number,best:object,iterations:number,ms:number,phase:string})=>void} [options.onProgress]
- *        pct เป็นสัดส่วน 0..1
- * @returns {{placements:Array, unplaced:Array, stats:object}}
- */
-export function solve(input, options = {}) {
-  const t0 = now();
-  const opt = options || {};
-  const timeLimit = Math.max(20, Number(opt.timeLimitMs) > 0 ? Number(opt.timeLimitMs) : 4000);
-  const seed = (Number(opt.seed) || 1) >>> 0;
-  const maxIter = Number(opt.maxIterations) > 0 ? Number(opt.maxIterations) : Infinity;
-  const effort = Math.min(5, Math.max(0.2, Number(opt.effort) || 1));
-  const onProgress = typeof opt.onProgress === 'function' ? opt.onProgress : null;
-  const rnd = mulberry32(seed || 1);
-  const rint = (n) => (rnd() * n) | 0;
+// ─────────────────────────────────────────────────────────────────────────────
+// เตรียมหน่วย + วิเคราะห์ความจุ (ใช้ร่วมกันระหว่าง solve และ capacityCheck)
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const M = buildModel(input);
-  const { D, P, S, C, T, R, A, G, isClass, lock, tUnav, tMax, aCls, aTch, aRoom, aPer, aDbl, aGrp, gapOf } = M;
-  const warnings = M.warnings.slice();
-  const WS = SOFT_WEIGHTS.sameDay, WA = SOFT_WEIGHTS.adjacentDays, WG = SOFT_WEIGHTS.teacherGap;
-
+/** แตกงานสอนเป็นหน่วย + คำนวณโดเมนของแต่ละหน่วย (ไม่สุ่ม ไม่ขึ้นกับ seed) */
+function prepareUnits(M, warnings) {
+  const { D, P, S, A, isClass, lock, tUnav, tMax, aCls, aTch, aRoom, aPer, aDbl, aGrp } = M;
   // ── 1) แตกเป็นหน่วย ──────────────────────────────────────────────────────
   const uA = [], uL = [], uFixed = [], uStart0 = [];
   const partnerDom = new Map();     // หน่วย "คู่หู" ของคาบคู่ที่ถูกปักหมุดไว้ครึ่งเดียว → ช่องที่อนุญาต
@@ -546,6 +526,212 @@ export function solve(input, options = {}) {
   domStart[U] = domTmp.length;
   const domList = Int32Array.from(domTmp);
   const domSize = (u) => domStart[u + 1] - domStart[u];
+
+  return { U, uLen, uAsg, uCls, uTch, uRoom, uGrp, uFixed, uStart0, partnerDom, preUnplaced, fixedOut, domStart, domList, domOk, dead, domSize };
+}
+
+/**
+ * วิเคราะห์ความจุล่วงหน้า: คาบรวมของห้อง/ครู/ห้องพิเศษ และช่องคาบคู่ → พิสูจน์ได้ว่าจัดไม่ครบหรือไม่
+ * คืนตัวเลขทั้งหมด + ตัวช่วยเขียนเหตุผล (ข้อความเดียวกันทั้งใน unplaced[].reason และ capacityCheck)
+ */
+function capacityOf(M, X) {
+  const { D, P, S, C, T, R, isClass, lock, tUnav, tMax } = M;
+  const { U, uLen, uAsg, uCls, uTch, uRoom, uFixed, partnerDom, dead } = X;
+  const classDemand = new Int32Array(C), teacherDemand = new Int32Array(T), roomDemand = new Int32Array(R);
+  for (let u = 0; u < U; u++) {
+    if (dead[u]) continue;
+    classDemand[uCls[u]] += uLen[u];
+    if (uTch[u] >= 0) teacherDemand[uTch[u]] += uLen[u];
+    if (uRoom[u] >= 0) roomDemand[uRoom[u]] += uLen[u];
+  }
+  const classCap = new Int32Array(C), teacherCap = new Int32Array(T);
+  let roomCap = 0;
+  for (let slot = 0; slot < S; slot++) if (isClass[slot % P] && !M.gLock[slot]) roomCap++;
+  for (let c = 0; c < C; c++) for (let slot = 0; slot < S; slot++) if (isClass[slot % P] && !lock[c * S + slot]) classCap[c]++;
+  const tDayFree = new Int16Array(T * D);   // ช่องที่ครูสอนได้ในแต่ละวัน (ก่อนหักเพดานต่อวัน) — ใช้หาเพดานใหม่ที่พอ
+  for (let t = 0; t < T; t++) for (let d = 0; d < D; d++) {
+    let n = 0;
+    for (let p = 0; p < P; p++) { const slot = d * P + p; if (isClass[p] && !M.gLock[slot] && !tUnav[t * S + slot]) n++; }
+    tDayFree[t * D + d] = n;
+    teacherCap[t] += Math.min(n, tMax[t]);
+  }
+  const overClass = new Uint8Array(C), overTeacher = new Uint8Array(T), overRoom = new Uint8Array(R);
+  let provablyInfeasible = false;
+  for (let c = 0; c < C; c++) if (classDemand[c] > classCap[c]) { overClass[c] = 1; provablyInfeasible = true; }
+  for (let t = 0; t < T; t++) if (teacherDemand[t] > teacherCap[t]) { overTeacher[t] = 1; provablyInfeasible = true; }
+  for (let r = 0; r < R; r++) if (roomDemand[r] > roomCap) { overRoom[r] = 1; provablyInfeasible = true; }
+  // ช่องคาบคู่: นับคู่ช่องว่างติดกันที่ไม่ทับกันได้มากสุดต่อวัน (greedy ซ้าย→ขวาให้ค่าสูงสุดบนเส้นตรง)
+  const maxPairs = (free, cap) => {
+    let pairs = 0;
+    for (let p = 0; p + 1 < P; p++) if (free(p) && free(p + 1)) { pairs++; p++; }
+    return Math.min(pairs, cap);
+  };
+  const classDbl = new Int32Array(C), teacherDbl = new Int32Array(T), classDblCap = new Int32Array(C), teacherDblCap = new Int32Array(T);
+  for (let u = 0; u < U; u++) {
+    if (dead[u] || uFixed[u] || uLen[u] !== 2) continue;
+    classDbl[uCls[u]]++;
+    if (uTch[u] >= 0) teacherDbl[uTch[u]]++;
+  }
+  for (let d = 0; d < D; d++) {
+    for (let c = 0; c < C; c++) if (classDbl[c]) classDblCap[c] += maxPairs((p) => isClass[p] && !lock[c * S + d * P + p], 99);
+    for (let t = 0; t < T; t++) if (teacherDbl[t]) teacherDblCap[t] += maxPairs((p) => isClass[p] && !M.gLock[d * P + p] && !tUnav[t * S + d * P + p], tMax[t] >> 1);
+  }
+  const overClassDbl = new Uint8Array(C), overTeacherDbl = new Uint8Array(T);
+  for (let c = 0; c < C; c++) if (classDbl[c] > classDblCap[c]) { overClassDbl[c] = 1; provablyInfeasible = true; }
+  for (let t = 0; t < T; t++) if (teacherDbl[t] > teacherDblCap[t]) { overTeacherDbl[t] = 1; provablyInfeasible = true; }
+  /**
+   * เพดาน "สูงสุด/วัน" ต่ำสุดของครู t ที่ทำให้คาบรวมและช่องคาบคู่พอ (วนจาก max+1 ถึงจำนวนช่องที่ครูว่างมากสุดในหนึ่งวัน)
+   * คืน 0 ถ้าครูไม่มีเพดานอยู่แล้ว หรือเพิ่มเพดานอย่างเดียวไม่พอ (ติดคาบไม่ว่าง/คาบล็อก)
+   */
+  function minMaxPerDay(t) {
+    if (tMax[t] >= 999) return 0;
+    let top = 0;
+    for (let d = 0; d < D; d++) top = Math.max(top, tDayFree[t * D + d]);
+    for (let m = tMax[t] + 1; m <= top; m++) {
+      let cap = 0, dbl = 0;
+      for (let d = 0; d < D; d++) cap += Math.min(tDayFree[t * D + d], m);
+      if (cap < teacherDemand[t]) continue;
+      if (teacherDbl[t]) for (let d = 0; d < D; d++) dbl += maxPairs((p) => isClass[p] && !M.gLock[d * P + p] && !tUnav[t * S + d * P + p], m >> 1);
+      if (dbl >= teacherDbl[t]) return m;
+    }
+    return 0;
+  }
+  const idOf = (list, i) => (list[i] && list[i].id !== undefined ? list[i].id : null);
+  const unavOf = (t) => { let n = 0; for (let slot = 0; slot < S; slot++) if (isClass[slot % P] && tUnav[t * S + slot]) n++; return n; };
+  const maxOf = (t) => (tMax[t] >= 999 ? 0 : tMax[t]);   // 0 = ไม่จำกัด (ตามรูปแบบใน input)
+
+  // เหตุผล + รหัส + ตัวเลข ของปัญหาความจุแต่ละชนิด (ข้อความเดิมทุกตัวอักษร — มีเทสต์และหน้าจอจับด้วย regex)
+  const why = {
+    class: (c) => ({
+      reason: `${M.className(c)} ต้องเรียนรวม ${classDemand[c]} คาบ/สัปดาห์ แต่มีคาบว่างเพียง ${classCap[c]} คาบ`,
+      code: 'CLASS_OVER', params: { classId: idOf(M.classes, c), need: classDemand[c], free: classCap[c] },
+    }),
+    teacher: (t) => {
+      const reason = `${M.teacherName(t)} ต้องสอน ${teacherDemand[t]} คาบ/สัปดาห์ แต่สอนได้สูงสุด ${teacherCap[t]} คาบ (รวมคาบไม่ว่างและเพดานต่อวัน)`;
+      const teacherId = idOf(M.teachers, t), m = minMaxPerDay(t);
+      // แก้ได้ด้วยการเพิ่มเพดานต่อวันอย่างเดียว → TEACHER_MAX_DAY (กดแก้ได้ทันที) ไม่งั้น TEACHER_OVER
+      if (m) return { reason, code: 'TEACHER_MAX_DAY', params: { teacherId, maxPerDay: maxOf(t), minNeeded: m, need: teacherDemand[t], free: teacherCap[t] } };
+      return { reason, code: 'TEACHER_OVER', params: { teacherId, need: teacherDemand[t], free: teacherCap[t], maxPerDay: maxOf(t), unavail: unavOf(t) } };
+    },
+    room: (r) => ({
+      reason: `${M.roomName(r)} ถูกใช้ ${roomDemand[r]} คาบ/สัปดาห์ เกินจำนวนคาบที่มี ${roomCap} คาบ`,
+      code: 'ROOM_OVER', params: { roomId: idOf(M.rooms, r), need: roomDemand[r], free: roomCap },
+    }),
+    teacherDbl: (t) => {
+      const params = { teacherId: idOf(M.teachers, t), doubles: teacherDbl[t], slots: teacherDblCap[t] };
+      const m = minMaxPerDay(t);
+      if (m) { params.maxPerDay = maxOf(t); params.minNeeded = m; }   // เพิ่มเพดานต่อวันก็ได้คู่เพิ่ม
+      return { reason: `${M.teacherName(t)} ต้องสอนคาบคู่ ${teacherDbl[t]} คู่ แต่มีช่องคาบคู่ที่ว่าง (ไม่คร่อมพัก) เพียง ${teacherDblCap[t]} คู่`, code: 'DOUBLE_NO_SLOT', params };
+    },
+    classDbl: (c) => ({
+      reason: `${M.className(c)} ต้องเรียนคาบคู่ ${classDbl[c]} คู่ แต่มีช่องคาบคู่ที่ว่างเพียง ${classDblCap[c]} คู่`,
+      code: 'DOUBLE_NO_SLOT', params: { classId: idOf(M.classes, c), doubles: classDbl[c], slots: classDblCap[c] },
+    }),
+  };
+  /** เหตุผลระดับความจุของหน่วย u (null = ความจุพอ ต้องดูจากสถานะการวาง) */
+  function explainCap(u) {
+    const c = uCls[u], t = uTch[u], r = uRoom[u];
+    if (overClass[c]) return why.class(c);
+    if (t >= 0 && overTeacher[t]) return why.teacher(t);
+    if (r >= 0 && overRoom[r]) return why.room(r);
+    if (uLen[u] === 2 && t >= 0 && overTeacherDbl[t]) return why.teacherDbl(t);
+    if (uLen[u] === 2 && overClassDbl[c]) return why.classDbl(c);
+    return null;
+  }
+  /** งานสอนที่ข้อมูลเสีย (ไม่พบห้องเรียน) */
+  const badWhy = (x) => ({ reason: x.reason, code: 'BAD_DATA', params: { what: 'class', assignmentId: M.asgs[x.a].id ?? null, classId: M.asgs[x.a].classId ?? null } });
+  /** หน่วยที่ไม่มีช่องลงได้เลยตั้งแต่ต้น (โดเมนว่าง) */
+  function deadWhy(u) {
+    const t = uTch[u], c = uCls[u], a = uAsg[u];
+    const teacherId = idOf(M.teachers, t), classId = idOf(M.classes, c), assignmentId = M.asgs[a].id ?? null;
+    if (partnerDom.has(u)) return { reason: 'คาบคู่ที่ปักหมุดไว้ครึ่งเดียว: ช่องข้างหมุดติดคาบล็อก/ครูไม่ว่าง', code: 'DOUBLE_NO_SLOT', params: { classId, assignmentId, doubles: M.aDbl[a], slots: 0, pinnedHalf: true } };
+    if (t >= 0 && tMax[t] < uLen[u]) return { reason: `${M.teacherName(t)} สอนได้วันละ ${tMax[t]} คาบ จึงลงคาบคู่ไม่ได้`, code: 'TEACHER_MAX_DAY', params: { teacherId, maxPerDay: tMax[t], minNeeded: Math.max(uLen[u], minMaxPerDay(t)) } };
+    if (uLen[u] === 2) return { reason: 'ไม่มีช่องคาบคู่ติดกัน (ไม่คร่อมพัก) ที่ครูว่างและไม่ติดคาบล็อก', code: 'DOUBLE_NO_SLOT', params: { classId, teacherId, assignmentId, doubles: M.aDbl[a], slots: 0 } };
+    const reason = 'ไม่มีคาบที่ครูว่างและไม่ติดคาบล็อกเลย';
+    // ห้องถูกล็อกทุกช่อง → BLOCKED_CLASS · ไม่งั้นช่องที่เหลือเป็นช่องที่ครูไม่ว่างทั้งหมด → BLOCKED_TEACHER
+    if (!classCap[c] || t < 0) return { reason, code: 'BLOCKED_CLASS', params: { classId } };
+    return { reason, code: 'BLOCKED_TEACHER', params: { teacherId, blocked: unavOf(t) } };
+  }
+  /** ปัญหาความจุทั้งหมด ทีละห้อง/ครู/ห้องพิเศษ (ลำดับคงที่) */
+  function issues() {
+    const out = [];
+    for (let c = 0; c < C; c++) if (overClass[c]) out.push(why.class(c));
+    for (let t = 0; t < T; t++) if (overTeacher[t]) out.push(why.teacher(t));
+    for (let r = 0; r < R; r++) if (overRoom[r]) out.push(why.room(r));
+    for (let t = 0; t < T; t++) if (overTeacherDbl[t]) out.push(why.teacherDbl(t));
+    for (let c = 0; c < C; c++) if (overClassDbl[c]) out.push(why.classDbl(c));
+    return out;
+  }
+
+  return {
+    classDemand, teacherDemand, roomDemand, classCap, teacherCap, roomCap,
+    overClass, overTeacher, overRoom, classDbl, teacherDbl, classDblCap, teacherDblCap, overClassDbl, overTeacherDbl,
+    provablyInfeasible, minMaxPerDay, explainCap, deadWhy, badWhy, issues,
+  };
+}
+
+/**
+ * ตรวจความจุแบบเร็วโดยไม่จัดจริง (ใช้แสดง "ความพร้อมก่อนจัด" ทุกครั้งที่วาดหน้าจอ)
+ * ตัวเลขและข้อความชุดเดียวกับที่ solve() ใช้เขียน unplaced[].reason
+ * @returns {{issues: Array<{code:string, params:object, text:string}>}}
+ *   code ดูรายการใน SPEC.md (CLASS_OVER, TEACHER_OVER, TEACHER_MAX_DAY, ROOM_OVER, DOUBLE_NO_SLOT, BLOCKED_*, NO_TEACHER, BAD_DATA)
+ */
+export function capacityCheck(input) {
+  const M = buildModel(input);
+  const X = prepareUnits(M, M.warnings.slice());
+  const K = capacityOf(M, X);
+  const out = [], seen = new Set();
+  const add = (w) => {
+    const k = w.code + '|' + JSON.stringify(w.params);
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ code: w.code, params: w.params, text: w.reason });
+  };
+  for (const x of X.preUnplaced) add(K.badWhy(x));
+  // งานสอนที่ไม่มีครู: solve() จัดให้ได้แต่ไม่ตรวจชนครู · อ้างครูที่ถูกลบ = ข้อมูลเสีย
+  for (let a = 0; a < M.A; a++) {
+    const x = M.asgs[a];
+    if (!x || M.aCls[a] < 0 || !(M.aPer[a] > 0)) continue;
+    const tk = keyOf(x.teacherId);
+    if (tk === null) add({ reason: 'การสอนนี้ยังไม่มีครู', code: 'NO_TEACHER', params: { assignmentId: x.id ?? null } });
+    else if (M.aTch[a] < 0) add({ reason: `การสอนนี้อ้างถึงครูที่ไม่พบ (${tk})`, code: 'BAD_DATA', params: { what: 'teacher', assignmentId: x.id ?? null, teacherId: tk } });
+  }
+  for (const w of K.issues()) add(w);
+  for (let u = 0; u < X.U; u++) if (X.dead[u]) add(K.deadWhy(u));
+  return { issues: out };
+}
+
+/**
+ * จัดตารางอัตโนมัติ
+ * @param {object} input  ตามสัญญา Solver ใน SPEC.md
+ * @param {object} [options]
+ * @param {number} [options.timeLimitMs=4000]  เวลาสูงสุด (หยุดเร็วกว่านั้นเมื่อไม่พบการปรับปรุงแล้ว)
+ * @param {number} [options.seed=1]            seed ของตัวสุ่ม (ค่าเดิม = ผลเดิม)
+ * @param {number} [options.maxIterations]     เพดานจำนวนรอบ (ไม่บังคับ)
+ * @param {number} [options.effort=1]          ตัวคูณความพยายามช่วงขัดเกลา soft (0.2–5)
+ * @param {(p:{pct:number,best:object,iterations:number,ms:number,phase:string})=>void} [options.onProgress]
+ *        pct เป็นสัดส่วน 0..1
+ * @returns {{placements:Array, unplaced:Array, stats:object}}
+ */
+export function solve(input, options = {}) {
+  const t0 = now();
+  const opt = options || {};
+  const timeLimit = Math.max(20, Number(opt.timeLimitMs) > 0 ? Number(opt.timeLimitMs) : 4000);
+  const seed = (Number(opt.seed) || 1) >>> 0;
+  const maxIter = Number(opt.maxIterations) > 0 ? Number(opt.maxIterations) : Infinity;
+  const effort = Math.min(5, Math.max(0.2, Number(opt.effort) || 1));
+  const onProgress = typeof opt.onProgress === 'function' ? opt.onProgress : null;
+  const rnd = mulberry32(seed || 1);
+  const rint = (n) => (rnd() * n) | 0;
+
+  const M = buildModel(input);
+  const { D, P, S, C, T, R, A, G, isClass, lock, tUnav, tMax, aCls, aTch, aRoom, aPer, aDbl, aGrp, gapOf } = M;
+  const warnings = M.warnings.slice();
+  const WS = SOFT_WEIGHTS.sameDay, WA = SOFT_WEIGHTS.adjacentDays, WG = SOFT_WEIGHTS.teacherGap;
+
+  // ── 1) แตกเป็นหน่วย + 2) โดเมน (prepareUnits) ─────────────────────────────
+  const X = prepareUnits(M, warnings);
+  const { U, uLen, uAsg, uCls, uTch, uRoom, uGrp, uFixed, uStart0, partnerDom, preUnplaced, fixedOut, domStart, domList, domOk, dead, domSize } = X;
 
   // หน่วยที่ขยับได้ + รายการหน่วยในแต่ละห้อง (ใช้หาคู่สลับ)
   const movTmp = [];
@@ -676,46 +862,9 @@ export function solve(input, options = {}) {
   }
 
   // ── วิเคราะห์ความจุล่วงหน้า (ใช้ตัดสิน infeasible ที่พิสูจน์ได้ + เขียนเหตุผล) ──
-  const classDemand = new Int32Array(C), teacherDemand = new Int32Array(T), roomDemand = new Int32Array(R);
-  for (let u = 0; u < U; u++) {
-    if (dead[u]) continue;
-    classDemand[uCls[u]] += uLen[u];
-    if (uTch[u] >= 0) teacherDemand[uTch[u]] += uLen[u];
-    if (uRoom[u] >= 0) roomDemand[uRoom[u]] += uLen[u];
-  }
-  const classCap = new Int32Array(C), teacherCap = new Int32Array(T);
-  let roomCap = 0;
-  for (let slot = 0; slot < S; slot++) if (isClass[slot % P] && !M.gLock[slot]) roomCap++;
-  for (let c = 0; c < C; c++) for (let slot = 0; slot < S; slot++) if (isClass[slot % P] && !lock[c * S + slot]) classCap[c]++;
-  for (let t = 0; t < T; t++) for (let d = 0; d < D; d++) {
-    let n = 0;
-    for (let p = 0; p < P; p++) { const slot = d * P + p; if (isClass[p] && !M.gLock[slot] && !tUnav[t * S + slot]) n++; }
-    teacherCap[t] += Math.min(n, tMax[t]);
-  }
-  const overClass = new Uint8Array(C), overTeacher = new Uint8Array(T), overRoom = new Uint8Array(R);
-  let provablyInfeasible = false;
-  for (let c = 0; c < C; c++) if (classDemand[c] > classCap[c]) { overClass[c] = 1; provablyInfeasible = true; }
-  for (let t = 0; t < T; t++) if (teacherDemand[t] > teacherCap[t]) { overTeacher[t] = 1; provablyInfeasible = true; }
-  for (let r = 0; r < R; r++) if (roomDemand[r] > roomCap) { overRoom[r] = 1; provablyInfeasible = true; }
-  // ช่องคาบคู่: นับคู่ช่องว่างติดกันที่ไม่ทับกันได้มากสุดต่อวัน (greedy ซ้าย→ขวาให้ค่าสูงสุดบนเส้นตรง)
-  const maxPairs = (free, cap) => {
-    let pairs = 0;
-    for (let p = 0; p + 1 < P; p++) if (free(p) && free(p + 1)) { pairs++; p++; }
-    return Math.min(pairs, cap);
-  };
-  const classDbl = new Int32Array(C), teacherDbl = new Int32Array(T), classDblCap = new Int32Array(C), teacherDblCap = new Int32Array(T);
-  for (let u = 0; u < U; u++) {
-    if (dead[u] || uFixed[u] || uLen[u] !== 2) continue;
-    classDbl[uCls[u]]++;
-    if (uTch[u] >= 0) teacherDbl[uTch[u]]++;
-  }
-  for (let d = 0; d < D; d++) {
-    for (let c = 0; c < C; c++) if (classDbl[c]) classDblCap[c] += maxPairs((p) => isClass[p] && !lock[c * S + d * P + p], 99);
-    for (let t = 0; t < T; t++) if (teacherDbl[t]) teacherDblCap[t] += maxPairs((p) => isClass[p] && !M.gLock[d * P + p] && !tUnav[t * S + d * P + p], tMax[t] >> 1);
-  }
-  const overClassDbl = new Uint8Array(C), overTeacherDbl = new Uint8Array(T);
-  for (let c = 0; c < C; c++) if (classDbl[c] > classDblCap[c]) { overClassDbl[c] = 1; provablyInfeasible = true; }
-  for (let t = 0; t < T; t++) if (teacherDbl[t] > teacherDblCap[t]) { overTeacherDbl[t] = 1; provablyInfeasible = true; }
+  const K = capacityOf(M, X);
+  const { teacherDemand, teacherCap, provablyInfeasible } = K;
+
 
   // ── ตัวช่วยเวลา/ความคืบหน้า ───────────────────────────────────────────
   const deadline = t0 + timeLimit;
@@ -954,33 +1103,22 @@ export function solve(input, options = {}) {
     for (let k = 0; k < uLen[u]; k++) placements.push({ assignmentId: id, day: d, period: s + k });
   }
 
-  // เหตุผลของคาบที่วางไม่ลง (ต่อ assignment)
+  // เหตุผลของคาบที่วางไม่ลง (ต่อ assignment) — reason = ข้อความเดิม · code/params = รหัสให้หน้าจอเลือกวิธีแก้ (ดู SPEC.md)
   const byA = new Map();
-  const addUnplaced = (a, periods, reason, rank) => {
+  const addUnplaced = (a, periods, why, rank) => {
     const e = byA.get(a);
-    if (!e) byA.set(a, { a, periods, reason, rank });
-    else { e.periods += periods; if (rank < e.rank) { e.reason = reason; e.rank = rank; } }
+    if (!e) byA.set(a, { a, periods, why, rank });
+    else { e.periods += periods; if (rank < e.rank) { e.why = why; e.rank = rank; } }
   };
-  for (const x of preUnplaced) addUnplaced(x.a, x.periods, x.reason, 0);
-  for (let u = 0; u < U; u++) {
-    if (!dead[u]) continue;
-    const t = uTch[u];
-    let reason;
-    if (partnerDom.has(u)) reason = 'คาบคู่ที่ปักหมุดไว้ครึ่งเดียว: ช่องข้างหมุดติดคาบล็อก/ครูไม่ว่าง';
-    else if (t >= 0 && tMax[t] < uLen[u]) reason = `${M.teacherName(t)} สอนได้วันละ ${tMax[t]} คาบ จึงลงคาบคู่ไม่ได้`;
-    else if (uLen[u] === 2) reason = 'ไม่มีช่องคาบคู่ติดกัน (ไม่คร่อมพัก) ที่ครูว่างและไม่ติดคาบล็อก';
-    else reason = 'ไม่มีคาบที่ครูว่างและไม่ติดคาบล็อกเลย';
-    addUnplaced(uAsg[u], uLen[u], reason, 1);
-  }
+  for (const x of preUnplaced) addUnplaced(x.a, x.periods, K.badWhy(x), 0);
+  for (let u = 0; u < U; u++) if (dead[u]) addUnplaced(uAsg[u], uLen[u], K.deadWhy(u), 1);
   for (const u of unplacedUnits) addUnplaced(uAsg[u], uLen[u], explainUnit(u), 2);
 
   function explainUnit(u) {
+    const cap = K.explainCap(u);
+    if (cap) return cap;
     const c = uCls[u], t = uTch[u], r = uRoom[u];
-    if (overClass[c]) return `${M.className(c)} ต้องเรียนรวม ${classDemand[c]} คาบ/สัปดาห์ แต่มีคาบว่างเพียง ${classCap[c]} คาบ`;
-    if (t >= 0 && overTeacher[t]) return `${M.teacherName(t)} ต้องสอน ${teacherDemand[t]} คาบ/สัปดาห์ แต่สอนได้สูงสุด ${teacherCap[t]} คาบ (รวมคาบไม่ว่างและเพดานต่อวัน)`;
-    if (r >= 0 && overRoom[r]) return `${M.roomName(r)} ถูกใช้ ${roomDemand[r]} คาบ/สัปดาห์ เกินจำนวนคาบที่มี ${roomCap} คาบ`;
-    if (uLen[u] === 2 && t >= 0 && overTeacherDbl[t]) return `${M.teacherName(t)} ต้องสอนคาบคู่ ${teacherDbl[t]} คู่ แต่มีช่องคาบคู่ที่ว่าง (ไม่คร่อมพัก) เพียง ${teacherDblCap[t]} คู่`;
-    if (uLen[u] === 2 && overClassDbl[c]) return `${M.className(c)} ต้องเรียนคาบคู่ ${classDbl[c]} คู่ แต่มีช่องคาบคู่ที่ว่างเพียง ${classDblCap[c]} คู่`;
+    const tid = (x) => M.teachers[x].id, cid = (x) => M.classes[x].id;
     // นับว่าช่องในโดเมนถูกขวางด้วยอะไรมากที่สุด
     let bc = 0, bt = 0, br = 0, bm = 0;
     const L = uLen[u];
@@ -995,16 +1133,17 @@ export function solve(input, options = {}) {
       bc += xc; bt += xt; br += xr;
       if (t >= 0 && tchDay[t * D + d] + L > tMax[t]) bm++;
     }
+    // ความจุพอแต่ช่องที่เหลือถูกจับจองหมด (ค้นไม่เจอ ไม่ใช่พิสูจน์ได้ว่าเป็นไปไม่ได้) → CROWDED_*
     const tail = ' — ลองเพิ่มเวลาจัด ผ่อนข้อจำกัด หรือเลิกปักหมุดบางคาบ';
     const top = Math.max(bc, bt, br, bm);
-    if (top === bt && t >= 0) return `${M.teacherName(t)} ติดสอนห้องอื่นในช่องที่เหลือ${tail}`;
-    if (top === br && r >= 0) return `${M.roomName(r)} ถูกใช้เต็มในช่องที่เหลือ${tail}`;
-    if (top === bm && t >= 0) return `${M.teacherName(t)} สอนครบ ${tMax[t]} คาบ/วัน ในวันที่ยังว่าง${tail}`;
-    return `${M.className(c)} ไม่มีช่องว่างที่ลง${L === 2 ? 'คาบคู่' : ''}ได้โดยไม่ชน${tail}`;
+    if (top === bt && t >= 0) return { reason: `${M.teacherName(t)} ติดสอนห้องอื่นในช่องที่เหลือ${tail}`, code: 'CROWDED_TEACHER', params: { teacherId: tid(t), classId: cid(c) } };
+    if (top === br && r >= 0) return { reason: `${M.roomName(r)} ถูกใช้เต็มในช่องที่เหลือ${tail}`, code: 'CROWDED_ROOM', params: { roomId: M.rooms[r].id, classId: cid(c) } };
+    if (top === bm && t >= 0) return { reason: `${M.teacherName(t)} สอนครบ ${tMax[t]} คาบ/วัน ในวันที่ยังว่าง${tail}`, code: 'CROWDED_MAX_DAY', params: { teacherId: tid(t), maxPerDay: tMax[t] } };
+    return { reason: `${M.className(c)} ไม่มีช่องว่างที่ลง${L === 2 ? 'คาบคู่' : ''}ได้โดยไม่ชน${tail}`, code: 'CROWDED_CLASS', params: { classId: cid(c) } };
   }
 
   const unplaced = [...byA.values()].sort((x, y) => x.a - y.a)
-    .map((e) => ({ assignmentId: M.asgs[e.a].id, remaining: e.periods, reason: e.reason }));
+    .map((e) => ({ assignmentId: M.asgs[e.a].id, remaining: e.periods, reason: e.why.reason, code: e.why.code, params: e.why.params }));
 
   const conflicts = validate(input, placements);
   const sc = score(input, placements);

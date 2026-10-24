@@ -148,6 +148,29 @@ function migrate(PDO $pdo, string $driver): void {
         $pdo->exec("ALTER TABLE schools ADD COLUMN logo $text NULL");
         $pdo->exec('ALTER TABLE schools ADD COLUMN logo_rev INT NOT NULL DEFAULT 0');
     }
+    // ข้อเสนอแนะจากผู้ใช้ (เพิ่ม 24 ต.ค. 69 · feedback.php เขียน, admin-feedback.php อ่าน) — โฮสต์ไม่มี mail()/cron จึงเก็บในฐาน
+    // ไม่มี FOREIGN KEY: cleanup_guests() ลบผู้ใช้/โรงเรียนทดลองแล้วข้อความต้องอยู่ต่อ (school_id/user_id ค้างเป็นเลขเฉย ๆ)
+    // ไม่เก็บ IP ไว้กับข้อความ (แม้แบบแฮช) · status: new|read|replied · เก็บ 1 ปี (privacy.php ข้อ 4)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS feedback (
+        id $id,
+        created_at DATETIME NOT NULL,
+        kind VARCHAR(20) NOT NULL,
+        message TEXT NOT NULL,
+        contact VARCHAR(200) NULL,
+        page VARCHAR(100) NOT NULL DEFAULT '',
+        school_id INT NULL,
+        user_id INT NULL,
+        provider VARCHAR(20) NOT NULL DEFAULT '',
+        ua VARCHAR(160) NOT NULL DEFAULT '',
+        status VARCHAR(20) NOT NULL DEFAULT 'new',
+        note_admin TEXT NULL
+    )$tail");
+    // นับป้าย "ใหม่ N" + กรองสถานะเรียงล่าสุดในหน้าแอดมิน
+    if ($driver === 'mysql') {
+        try { $pdo->exec('CREATE INDEX feedback_status_created ON feedback (status, created_at)'); } catch (PDOException) { /* มีแล้ว */ }
+    } else {
+        $pdo->exec('CREATE INDEX IF NOT EXISTS feedback_status_created ON feedback (status, created_at)');
+    }
 }
 
 function now(): string { return date('Y-m-d H:i:s'); }
@@ -209,9 +232,37 @@ function db_tx(callable $fn) {
     });
 }
 
-/** IP ผู้ใช้แบบแฮช (ไม่เก็บ IP จริง) ใช้เป็นชื่อถังของ rate limit */
+/**
+ * salt ลับของ rate limit (salt คงที่ในโค้ด repo สาธารณะ = ย้อนหา IPv4 จากแฮชได้ในไม่กี่นาที)
+ * ลำดับ: config 'rl_salt' → ไฟล์ storage/rl-salt (สุ่มสร้างครั้งแรก · storage ปิดจากเว็บด้วย .htaccess) → ค่าจาก secret ใน config
+ * เปลี่ยน salt = แค่รีเซ็ตตัวนับใน rate_hits ที่อายุไม่ถึง 1 วัน ไม่กระทบข้อมูลอื่น
+ */
+function rl_salt(): string {
+    static $salt = null;
+    if ($salt !== null) return $salt;
+    $c = (string) cfg('rl_salt', '');
+    if ($c !== '') return $salt = $c;
+    $file = APP_ROOT . '/storage/rl-salt';
+    $v = is_readable($file) ? trim((string) @file_get_contents($file)) : '';
+    if (strlen($v) < 32) {
+        $v = bin2hex(random_bytes(32));
+        if (@file_put_contents($file, $v, LOCK_EX) === false) {
+            $v = hash('sha256', 'tt-rl|' . cfg('google.client_secret', '') . '|' . cfg('line.channel_secret', '') . '|' . cfg('db.pass', '')); // เขียนไฟล์ไม่ได้
+        } else {
+            @chmod($file, 0600);
+        }
+    }
+    return $salt = $v;
+}
+
+/** IP ผู้ใช้แบบแฮช (ไม่เก็บ IP จริง) ใช้เป็นชื่อถังของ rate limit · IPv6 นับทั้ง /64 เป็นเครื่องเดียว (เครื่องหนึ่งเปลี่ยนเลขท้ายได้เอง) */
 function client_key(): string {
-    return substr(hash('sha256', 'tt-rl|' . ($_SERVER['REMOTE_ADDR'] ?? '-')), 0, 32);
+    $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? '-');
+    if (str_contains($ip, ':')) {
+        $bin = @inet_pton($ip);
+        if ($bin !== false && strlen($bin) === 16) $ip = 'v6/' . bin2hex(substr($bin, 0, 8));
+    }
+    return substr(hash_hmac('sha256', $ip, rl_salt()), 0, 32);
 }
 
 /**

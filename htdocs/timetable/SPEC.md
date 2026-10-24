@@ -64,17 +64,40 @@ const result = solve(input, { timeLimitMs: 4000, seed: 1 });
   classes:  [{ id }],
   teachers: [{ id, maxPerDay: 6, unavailable: [[day, period], ...] }],
   rooms:    [{ id }],
-  assignments: [{ id, classId, teacherId, roomId: null, perWeek: 3, doubles: 1 }],
-  locks:    [{ classId: null, day, period }],
+  assignments: [{ id, subjectId, classId, teacherId, roomId: null, perWeek: 3, doubles: 1 }],  // subjectId: แถวแบ่งสอนวิชาเดียวกันนับ soft ร่วมกัน
+  locks:    [{ classId: null, day, period, label }],                                       // label: ใช้ในข้อความชน "วางทับคาบล็อก (ลูกเสือ)"
   fixed:    [{ assignmentId, day, period }]      // placements ที่ pinned — ห้ามย้าย
 }
 // result
 {
   placements: [{ assignmentId, day, period }],   // รวม fixed
-  unplaced:   [{ assignmentId, remaining, reason }],
+  unplaced:   [{ assignmentId, remaining, reason, code, params }],   // reason = ข้อความไทยเดิม · code/params = ดูตารางรหัสด้านล่าง
   stats: { hardViolations: 0, softScore, ms, iterations }
 }
 ```
+```js
+import { capacityCheck } from './solver.js';
+capacityCheck(input)   // → { issues: [{ code, params, text }] } ตรวจความจุเร็วโดยไม่จัดจริง (ตัวเลข/ข้อความชุดเดียวกับ solve)
+```
+**รหัสเหตุผล (unplaced[].code / capacityCheck issues[].code)** — `reason`/`text` เป็นข้อความไทยเดิมทุกตัวอักษร (มีเทสต์และ regex จับ) รหัสเป็นฟิลด์ข้างกัน · id ใน params เป็นค่าเดิมจาก input
+| code | params | ความหมาย | ปุ่มใน board.js (FIXES) |
+|---|---|---|---|
+| `CLASS_OVER` | classId, need, free | ห้องต้องเรียนเกินช่องที่มี | เพิ่ม 1 คาบ/วัน (เลิกทำได้) · ไปดูคาบล็อก |
+| `TEACHER_MAX_DAY` | teacherId, maxPerDay, minNeeded (+need, free) | เพิ่มเพดาน “สูงสุด/วัน” เป็น minNeeded แล้วความจุพอ (ค่าต่ำสุดที่พอ ทั้งคาบรวมและช่องคาบคู่) · หรือเพดาน < 2 จึงลงคาบคู่ไม่ได้ | “เพิ่มเป็น N” |
+| `TEACHER_OVER` | teacherId, need, free, maxPerDay (0 = ไม่จำกัด), unavail | ครูสอนเกินความจุ และเพิ่มเพดานอย่างเดียวไม่พอ | ไปดูช่องไม่ว่าง · แบ่งวิชาที่คาบมากสุดให้ครูอื่น |
+| `ROOM_OVER` | roomId, need, free | ห้องพิเศษถูกใช้เกินช่องที่มี | ไปแท็บห้องพิเศษ |
+| `DOUBLE_NO_SLOT` | classId และ/หรือ teacherId, doubles, slots (+assignmentId, pinnedHalf, minNeeded ถ้ามี) | ช่องคาบคู่ไม่พอ · pinnedHalf = ปักหมุดคาบคู่ไว้ครึ่งเดียวแล้วข้างหมุดลงไม่ได้ | ลดคาบคู่ของแถวนั้น · เพิ่มเพดานถ้ามี minNeeded |
+| `BLOCKED_TEACHER` | teacherId, blocked | ช่องที่เหลือเป็นช่องที่ครูไม่ว่างทั้งหมด | ไปแท็บครู |
+| `BLOCKED_CLASS` | classId | ห้องถูกล็อกจนไม่มีคาบเรียน | ไปแท็บคาบล็อก |
+| `BLOCKED_ROOM` | roomId | (สงวนไว้ ยังไม่มีที่ส่ง) | ไปแท็บห้องพิเศษ |
+| `NO_TEACHER` | assignmentId (capacityCheck) | การสอนยังไม่มีครู (board กรองออกก่อนจัด นับใน readiness) | ไปเติมครู → tt:goto {tab:'data', section:'assignments', filter:'noTeacher'} |
+| `BAD_DATA` | what ('class'\|'teacher'), assignmentId, classId/teacherId | อ้างห้อง/ครูที่ไม่พบ | ไปแท็บการสอน |
+| `CROWDED_TEACHER` / `CROWDED_ROOM` / `CROWDED_CLASS` / `CROWDED_MAX_DAY` | teacherId/roomId/classId (+maxPerDay) | ความจุพอแต่ค้นไม่เจอช่อง (ไม่ใช่พิสูจน์ว่าเป็นไปไม่ได้) | จัดใหม่/เลิกปักหมุด · CROWDED_MAX_DAY ลองเพิ่มเพดาน +1 |
+
+ปุ่ม “แก้ให้เลย” ทุกปุ่ม: แก้เอกสาร → `store.commit('fix')` ครั้งเดียว → toast “เลิกทำ” 10 วินาที · ผลเก่าที่ไม่มี code ใช้ regex ตามข้อความเดิม (fixFor)
+
+**บันทึกรุ่น (ต.ค. 69):** solverInput ส่ง subjectId แล้ว ⇒ ผลจัดของโรงเรียนที่มีแบ่งสอน (วิชาเดียว 2 ครู) จะเปลี่ยน (ดีขึ้น: ไม่ลงวิชาเดียวกันซ้ำวัน) · ข้อความชนคาบล็อกบอกชื่อกิจกรรม
+
 **Hard:** ห้องเรียน/ครู/ห้องพิเศษ ไม่ซ้อนคาบ · ห้ามลงช่องพัก/คาบล็อก/คาบที่ครูไม่ว่าง · ครูไม่เกิน maxPerDay · คู่คาบต้องติดกันในวันเดียวกันไม่คร่อมช่องพัก
 **Soft:** วิชาเดียวกันในห้องเดียววันละไม่เกิน 1 ครั้ง (คู่คาบนับเป็น 1) · กระจายวิชาให้ทั่วสัปดาห์ · ลดคาบว่างแทรกของครู
 

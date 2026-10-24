@@ -1,0 +1,2 @@
+# salt ลับของ rate limit (lib/db.php rl_salt สร้างเองครั้งแรก) — ห้ามขึ้น git
+rl-salt

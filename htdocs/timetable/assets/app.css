@@ -107,7 +107,7 @@ button, input, select, textarea { font:inherit; color:inherit; }
 .swal2-toast.tt-toast .swal2-actions { margin:0 0 0 6px; }
 .swal2-toast.tt-status { opacity:.96; }
 .swal2-toast.tt-status .swal2-title { color:var(--muted); }
-.swal2-toast.tt-action { border-left:4px solid #C8962E; }
+.swal2-popup.swal2-toast.tt-action { border-color:#C8962E; background:var(--gold-soft); } /* toast มีปุ่ม (เลิกทำ): ขอบรอบทอง + พื้นทองอ่อน ไม่ใช้แถบขอบซ้าย */
 @media (prefers-color-scheme: dark) {
   .btn.btn-swal-ok { background:#1F5FA8; border-color:#1F5FA8; }
   .btn.btn-swal-ok:hover { background:#2D72C2; border-color:#2D72C2; }
