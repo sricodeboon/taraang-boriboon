@@ -1,9 +1,11 @@
 // ทดสอบ solver — รัน: node htdocs/timetable/tests/solver.test.mjs
 // ไม่มี dependency ภายนอก (node >= 18)
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { readFileSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { solve, validate, score, toSolverInput, capacityCheck } from '../assets/solver/solver.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -751,6 +753,276 @@ await test('ข้อมูลตัวอย่าง: โครงสร้า
     assert.ok(need <= free - locked, `${c.name} ${need} > ${free - locked}`);
   }
   return `${sample.classes.length} ห้อง · ${sample.teachers.length} ครู · ${sample.rooms.length} ห้องพิเศษ · ${sample.subjects.length} รายวิชา · ${sample.assignments.length} งานสอน · ${sample.locks.length} คาบล็อก`;
+});
+
+// ── DELIGHT ก (24 ต.ค. 69): ล็อกผลเดิม + เพดานหน่วย + progress/phase/snapshot + adjacentDays ส่วนเกิน ──
+// ก-0: hash ของ JSON.stringify(result.placements) คำนวณจาก solver.js ของ main 6fd069e *ก่อนแก้โค้ด* (24 ต.ค. 69)
+// ทุกการแก้ใน DELIGHT ก ต้องไม่เปลี่ยนค่านี้ (ข้อมูลปกติ ไม่ส่ง group = ผลเท่าเดิมทุกคาบ)
+const sha1 = (s) => createHash('sha1').update(s).digest('hex');
+const LOCKED_HASH = {
+  'sample-school.json': '59fbaa6da1994dbfb2ec370aa094741d9f4531cb',   // 351 คาบ softScore 4
+  'sample-primary.json': '10b7ea7e92071164585214df3cefd634e7a4a750',  // 147 คาบ softScore 72
+};
+const LOCKED_SOFT = { 'sample-school.json': 4, 'sample-primary.json': 72 };
+// [placements, unplaced] ของ sample-primary ที่ perWeek = 10 ทุกแถว (ภาระเกิน → เข้า repair) seed 1 — จากรุ่นก่อนแก้ 24 ต.ค. 69
+const PW10_HASH = '1e3122bef2a7d4503c18e8a6c89b2189f666ba7c';
+await test('ก-0 ผลจัด sample 2 ไฟล์ (seed 1, 4000 ms) เท่าเดิมทุกคาบ (hash ล็อก 24 ต.ค. 69)', () => {
+  const out = [];
+  for (const f of Object.keys(LOCKED_HASH)) {
+    const d = JSON.parse(readFileSync(join(here, '../assets/solver/' + f), 'utf8'));
+    const r = solve(d, { seed: 1, timeLimitMs: 4000 });
+    assert.equal(sha1(JSON.stringify(r.placements)), LOCKED_HASH[f], `${f}: placements เปลี่ยน`);
+    assert.equal(r.stats.softScore, LOCKED_SOFT[f], `${f}: softScore เปลี่ยน`);
+    out.push(`${f} ${r.placements.length} คาบ`);
+  }
+  return out.join(' · ');
+});
+
+// ── ก-1 เพดานหน่วย + เคารพ timeLimit ──
+await test('ก-1 perWeek 1e6 แถวเดียว (ไฟล์สำรองเสีย) → คืนภายใน 2×timeLimit ไม่ throw · BAD_DATA what:perWeek · แถวอื่นจัดครบ', () => {
+  const d = clone(primary);
+  d.assignments[0].perWeek = 1e6;
+  const limit = 2000, t = now();
+  const r = solve(d, { seed: 1, timeLimitMs: limit });
+  const wall = now() - t;
+  assert.ok(wall <= 2 * limit, `ใช้ ${wall.toFixed(0)} ms`);
+  const u = r.unplaced.find((x) => x.assignmentId === d.assignments[0].id);
+  assert.ok(u && u.code === 'BAD_DATA' && u.params.what === 'perWeek', JSON.stringify(u));
+  assert.equal(u.reason, 'คาบ/สัปดาห์เกิน 60 (ข้อมูลผิดปกติ)');
+  assert.equal(r.unplaced.length, 1, JSON.stringify(r.unplaced.slice(0, 3)));
+  assert.equal(r.stats.hardViolations, 0);
+  // capacityCheck ให้รหัสเดียวกัน
+  assert.ok(capacityCheck(d).issues.some((i) => i.code === 'BAD_DATA' && i.params.what === 'perWeek'));
+  return `${wall.toFixed(0)} ms · ${r.placements.length} คาบ`;
+});
+
+await test('ก-1 แถว perWeek เกิน 60 ที่มีคาบปักหมุด: หมุดยังอยู่ในผลและกันช่องไว้ (ไม่มีหน่วยอื่นลงทับ)', () => {
+  const d = clone(primary);
+  const a = d.assignments[0];
+  a.perWeek = 999;
+  d.placements = [{ assignmentId: a.id, day: 0, period: 0, pinned: true }];
+  const r = solve(d, { seed: 1, timeLimitMs: 2000 });
+  assert.ok(r.placements.some((p) => p.assignmentId === a.id && p.day === 0 && p.period === 0));
+  const same = r.placements.filter((p) => p.day === 0 && p.period === 0 && d.assignments.find((x) => x.id === p.assignmentId)?.classId === a.classId);
+  assert.equal(same.length, 1, 'ห้องเดียวกันช่องเดียวกันต้องมีแค่หมุด');
+  const u = r.unplaced.find((x) => x.assignmentId === a.id);
+  assert.equal(u.remaining, 998);
+});
+
+await test('ก-1 5000 แถว × perWeek 20 (ครู 50 ห้อง 100) → wall ≤ 1.5×timeLimit · แถวเกินเพดานหน่วยได้ BAD_DATA what:units', () => {
+  const P = Array.from({ length: 9 }, (_, i) => ({ type: i === 4 ? 'break' : 'class' }));
+  const big = { days: 5, periods: P, classes: [], teachers: [], rooms: [], assignments: [], locks: [], fixed: [] };
+  for (let i = 0; i < 100; i++) big.classes.push({ id: 'c' + i });
+  for (let i = 0; i < 50; i++) big.teachers.push({ id: 't' + i, maxPerDay: 6 });
+  for (let i = 0; i < 5000; i++) big.assignments.push({ id: 'a' + i, subjectId: 's' + (i % 37), classId: 'c' + (i % 100), teacherId: 't' + (i % 50), roomId: null, perWeek: 20, doubles: i % 3 === 0 ? 2 : 0 });
+  const limit = 1500, t = now();
+  const r = solve(big, { seed: 1, timeLimitMs: limit });
+  const wall = now() - t;
+  assert.ok(wall <= 1.5 * limit, `ใช้ ${wall.toFixed(0)} ms`);
+  assert.ok(r.stats.units <= 20000, `units ${r.stats.units}`);
+  const bad = r.unplaced.filter((u) => u.code === 'BAD_DATA');
+  assert.ok(bad.length > 0 && bad.every((u) => u.params.what === 'units'));
+  return `${wall.toFixed(0)} ms · units ${r.stats.units} · วาง ${r.placements.length} · BAD_DATA ${bad.length} แถว`;
+});
+
+await test('ก-1 extract แบบ heap เลือกหน่วยเดียวกับรุ่นเดิม: ภาระเกิน (perWeek 10 ทุกแถว) seed 1 ผลเดิม', () => {
+  // hash คำนวณจากรุ่นก่อนแก้ (24 ต.ค. 69) — เคสนี้เข้า repair (extractConflicts + reinsert) จริง
+  const d = clone(primary);
+  for (const a of d.assignments) a.perWeek = 10;
+  const r = solve(d, { seed: 1, timeLimitMs: 30000 });
+  assert.equal(r.stats.timedOut, false);
+  assert.ok(r.unplaced.length > 0);
+  assert.equal(sha1(JSON.stringify([r.placements, r.unplaced])), PW10_HASH);
+});
+
+// ── ก-2 progress monotonic + phase · ก-3 snapshot ──
+await test('ก-2 pctMono ไม่ลดเลย · phase แรก greedy · สุดท้าย pct 1 · placed/total ครบ · onPhase ทันที', () => {
+  const big = scaled(3);
+  const ev = [], ph = [];
+  const r = solve(big, { seed: 1, timeLimitMs: 3000, onProgress: (p) => ev.push(p), onPhase: (p) => ph.push(p) });
+  assert.ok(ev.length >= 3);
+  assert.equal(ev[0].phase, 'greedy');
+  for (let i = 1; i < ev.length; i++) assert.ok(ev[i].pctMono >= ev[i - 1].pctMono, `pctMono ถอย ${ev[i - 1].pctMono} → ${ev[i].pctMono}`);
+  for (const e of ev) assert.ok(e.pctMono >= e.pct && typeof e.placed === 'number' && e.total === ev[0].total);
+  const last = ev.at(-1);
+  assert.equal(last.pct, 1); assert.equal(last.pctMono, 1);
+  assert.equal(last.placed, r.placements.length);
+  assert.equal(last.total, r.placements.length + r.stats.unplacedPeriods);
+  assert.deepEqual(ph[0].phase, 'greedy');
+  assert.ok(ph.some((p) => p.phase === 'hard') && ph.at(-1).phase === 'soft', ph.map((p) => p.phase).join());
+  assert.ok(ph.every((p) => typeof p.ms === 'number'));
+  return `${ev.length} progress · phases ${ph.map((p) => p.phase).join('→')}`;
+});
+
+await test('ก-2/ก-3 มี/ไม่มี onProgress (และปิด snapshot) → placements เท่ากันทุกตัว (ไม่แตะ RNG)', () => {
+  for (const [d, lim] of [[sample, 4000], [primary, 4000], [scaled(2), 4000]]) {
+    const a = solve(d, { seed: 3, timeLimitMs: lim });
+    const b = solve(d, { seed: 3, timeLimitMs: lim, onProgress: () => {}, onPhase: () => {} });
+    const c = solve(d, { seed: 3, timeLimitMs: lim, onProgress: () => {}, progressPlacements: false });
+    assert.equal(a.stats.timedOut || b.stats.timedOut || c.stats.timedOut, false);
+    assert.equal(JSON.stringify(b.placements), JSON.stringify(a.placements));
+    assert.equal(JSON.stringify(c.placements), JSON.stringify(a.placements));
+  }
+});
+
+await test('ก-3 onProgress ได้ placements ≥ 1 ครั้ง (timeLimit ≥ 300) · ตรวจไม่ชน · progressPlacements:false = ไม่แนบ', () => {
+  const ev = [];
+  solve(sample, { seed: 1, timeLimitMs: 300, onProgress: (p) => ev.push(p) });
+  const snaps = ev.filter((e) => Array.isArray(e.placements));
+  assert.ok(snaps.length >= 1, 'ไม่มี snapshot');
+  const ids = new Set(sample.assignments.map((a) => a.id));
+  for (const s of snaps) {
+    assert.equal(s.placements.length, s.placed);
+    assert.ok(s.placements.every((p) => ids.has(p.assignmentId) && Number.isInteger(p.day) && Number.isInteger(p.period)));
+    assert.equal(validate(sample, s.placements).filter((c) => c.type !== 'double').length, 0, 'snapshot ต้องไม่มีคาบชน');
+  }
+  const ev2 = [];
+  solve(sample, { seed: 1, timeLimitMs: 300, progressPlacements: false, onProgress: (p) => ev2.push(p) });
+  assert.ok(ev2.length > 0 && ev2.every((e) => !('placements' in e) && !('delta' in e)));
+  return `snapshot ${snaps.length} ครั้ง จาก ${ev.length}`;
+});
+
+/** มัธยม 42 ห้อง (ม.1–6 × 7) 8 วิชา 22 คาบ/ห้อง = 924 คาบ · ครูกลุ่มละ ≤ 18 คาบ · ห้องพิเศษ 6 */
+function secondary42() {
+  const P = [0, 1, 2, 3, 'b', 4, 5, 6, 7].map((x) => ({ type: x === 'b' ? 'break' : 'class' }));
+  const SUBJ = [['th', 3, 0], ['ma', 3, 0], ['sc', 4, 1], ['so', 3, 0], ['pe', 2, 0], ['ar', 2, 0], ['wk', 2, 1], ['en', 3, 0]];
+  const d = { days: 5, periods: P, classes: [], teachers: [], rooms: [], assignments: [], locks: [], fixed: [] };
+  for (let i = 1; i <= 6; i++) d.rooms.push({ id: 'r' + i });
+  const pool = {};
+  let tid = 0, aid = 0, rr = 0;
+  for (const [g, pw] of SUBJ) { pool[g] = []; for (let i = 0; i < Math.ceil((42 * pw) / 18); i++) { const id = 't' + ++tid; d.teachers.push({ id, maxPerDay: 6 }); pool[g].push(id); } }
+  for (let m = 1; m <= 6; m++) for (let r = 1; r <= 7; r++) {
+    const c = `c${m}${r}`;
+    d.classes.push({ id: c });
+    for (const [g, pw, dbl] of SUBJ) d.assignments.push({ id: 'a' + ++aid, subjectId: g + m, classId: c, teacherId: pool[g][rr++ % pool[g].length], roomId: g === 'sc' ? 'r' + (((m - 1) % 3) + 1) : g === 'wk' ? 'r' + (4 + ((r - 1) % 3)) : null, perWeek: pw, doubles: dbl });
+    if (m <= 3) d.locks.push({ classId: c, day: 2, period: 8, label: 'ลูกเสือ' });
+  }
+  d.locks.push({ classId: null, day: 4, period: 8, label: 'ชุมนุม' });
+  return d;
+}
+
+await test('ก-3 42 ห้อง: snapshot แต่ละครั้ง ≤ 60 KB (JSON) · delta เมื่อเกิน 2,000 รายการ', () => {
+  const d = secondary42();
+  const ev = [];
+  const r = solve(d, { seed: 1, timeLimitMs: 1500, onProgress: (p) => ev.push(p) });
+  const snaps = ev.filter((e) => e.placements);
+  assert.ok(snaps.length >= 1);
+  const maxLen = Math.max(...snaps.map((e) => JSON.stringify(e).length));
+  assert.ok(maxLen <= 60 * 1024, `ใหญ่ ${maxLen}`);
+  // ข้อมูลใหญ่ (> 2,000 คาบ) → ส่ง delta {add, remove} ที่ประกอบกลับได้เท่า placed
+  const huge = scaled(6);   // 72 ห้อง 2,106 คาบ
+  const ev2 = [];
+  solve(huge, { seed: 1, timeLimitMs: 1500, onProgress: (p) => ev2.push(p) });
+  const set = new Set();
+  let nDelta = 0;
+  for (const e of ev2) {
+    if (e.placements) { set.clear(); for (const p of e.placements) set.add(`${p.assignmentId}|${p.day}|${p.period}`); }
+    if (!e.delta) continue;
+    nDelta++;
+    for (const x of e.delta.remove) assert.ok(set.delete(x.join('|')), 'ลบสิ่งที่ไม่มี');
+    for (const x of e.delta.add) set.add(x.join('|'));
+    assert.equal(set.size, e.placed);
+  }
+  assert.ok(nDelta >= 1, 'ต้องมี delta');
+  return `42 ห้อง ${r.placements.length} คาบ snapshot สูงสุด ${(maxLen / 1024).toFixed(1)} KB · 72 ห้อง delta ${nDelta} ครั้ง`;
+});
+
+await test('ก-2 worker: progress มี pctMono/placed/total · ส่ง {type:"phase"} ≥ 2 ค่า · placements เท่ากับ solve ตรง', async () => {
+  const msgs = [];
+  globalThis.self = { postMessage: (m) => msgs.push(m) };
+  // worker.js ไม่มี import/export → node โหลดเป็น CommonJS ซึ่งแคชตามไฟล์ (query ไม่ช่วย) — คัดลอกไปโฟลเดอร์ชั่วคราวเพื่อได้ instance ใหม่
+  const dir = mkdtempSync(join(tmpdir(), 'tt-worker-'));
+  for (const f of ['solver.worker.js', 'solver.js']) copyFileSync(join(here, '../assets/solver/', f), join(dir, f));
+  await import(pathToFileURL(join(dir, 'solver.worker.js')).href);
+  const handler = globalThis.self.onmessage;
+  await handler({ data: { type: 'solve', input: sample, options: { timeLimitMs: 4000, seed: 1 } } });
+  const prog = msgs.filter((m) => m.type === 'progress');
+  const phases = msgs.filter((m) => m.type === 'phase');
+  assert.ok(prog.every((p) => typeof p.pctMono === 'number' && typeof p.placed === 'number' && typeof p.total === 'number'));
+  assert.ok(new Set(phases.map((p) => p.phase)).size >= 2, phases.map((p) => p.phase).join());
+  assert.equal(phases[0].phase, 'greedy');
+  assert.ok(prog.some((p) => Array.isArray(p.placements)));
+  const done = msgs.find((m) => m.type === 'done');
+  assert.equal(sha1(JSON.stringify(done.result.placements)), LOCKED_HASH['sample-school.json']);
+  msgs.length = 0;
+  await handler({ data: { type: 'solve', input: sample, options: { timeLimitMs: 4000, seed: 1, progressPlacements: false } } });
+  assert.ok(msgs.filter((m) => m.type === 'progress').every((p) => !('placements' in p) && !('delta' in p)));
+  delete globalThis.self;
+  rmSync(dir, { recursive: true, force: true });
+  return `progress ${prog.length} · phase ${phases.map((p) => p.phase).join('→')}`;
+});
+
+// ── ก-4 adjacentDays = ส่วนเกินขั้นต่ำ ──
+/** ประถม 6 ห้อง ครู 6 ประจำชั้นสอนทุกวิชา (ไทย 5 คณิต 5 อังกฤษ 4 …) 24 คาบ/ห้อง D = 5 */
+function primaryFit6() {
+  const P = [0, 1, 2, 'b', 3, 4, 5].map((x) => ({ type: x === 'b' ? 'break' : 'class' }));
+  const CORE = [['th', 5], ['ma', 5], ['sc', 2], ['so', 2], ['hi', 1], ['pe', 2], ['ar', 2], ['wk', 1], ['en', 4]];
+  const d = { days: 5, periods: P, classes: [], teachers: [], rooms: [], assignments: [], locks: [], fixed: [] };
+  let aid = 0;
+  for (let c = 1; c <= 6; c++) {
+    d.classes.push({ id: 'c' + c }); d.teachers.push({ id: 't' + c, maxPerDay: 0 });
+    for (const [g, pw] of CORE) d.assignments.push({ id: 'a' + ++aid, subjectId: g + c, classId: 'c' + c, teacherId: 't' + c, roomId: null, perWeek: pw, doubles: 0 });
+  }
+  for (const day of [2, 3, 4]) d.locks.push({ classId: null, day, period: 6, label: 'กิจกรรม' });
+  return d;
+}
+
+await test('ก-4 ประถมพอดี (ไทย 5 คณิต 5 อังกฤษ 4, D=5) → adjacentDays 0 (ส่วนเกิน) · adjacentDaysRaw 60 (= ขั้นต่ำ)', () => {
+  const d = primaryFit6();
+  for (const seed of [1, 7]) {
+    const r = solve(d, { seed, timeLimitMs: 4000 });
+    assert.equal(r.stats.hardViolations, 0); assert.equal(r.unplaced.length, 0);
+    assert.equal(r.stats.soft.adjacentDays, 0, JSON.stringify(r.stats.soft));
+    assert.equal(r.stats.soft.adjacentDaysRaw, 60, JSON.stringify(r.stats.soft));
+    const s = score(d, r.placements);
+    assert.equal(s.adjacentDays, 0); assert.equal(s.adjacentDaysRaw, 60);
+    assert.equal(s.softScore, 10 * s.sameDay + 2 * s.adjacentDaysRaw + s.teacherGaps, 'softScore ยังคิดจากค่า raw (น้ำหนักเดิม)');
+  }
+  // sample เดิม: raw = ค่าที่เคยรายงาน (2) · ส่วนเกินไม่ติดลบ
+  const r0 = solve(sample, { seed: 1, timeLimitMs: 4000 });
+  assert.equal(r0.stats.soft.adjacentDaysRaw, 2);
+  assert.ok(r0.stats.soft.adjacentDays >= 0 && r0.stats.soft.adjacentDays <= 2);
+});
+
+// ── ก-8 (stretch) วิชาหลักช่วงเช้า + ห้องไม่มีคาบว่างกลางวัน — ใช้เมื่อส่ง assignments[].group ──
+const GROUP_OF = { th: 'TH', ma: 'MA', sc: 'SC', so: 'SO', hi: 'SO', pe: 'HE', ar: 'AR', wk: 'OC', en: 'FL' };
+function withGroups(d) { for (const a of d.assignments) a.group = GROUP_OF[a.subjectId.replace(/\d+$/, '')]; return d; }
+function primaryWide() {   // ประถม 8 คาบ/วัน เรียน 24 คาบ (ห้องไม่เต็ม → มีที่ให้เกิดคาบว่างกลางวัน)
+  const d = primaryFit6();
+  d.periods = [0, 1, 2, 3, 'b', 4, 5, 6, 7].map((x) => ({ type: x === 'b' ? 'break' : 'class' }));
+  for (const l of d.locks) l.period = 8;
+  return d;
+}
+const afternoonPct = (d, r) => {
+  const brk = d.periods.findIndex((p) => p.type === 'break');
+  const sub = new Map(d.assignments.map((a) => [a.id, a.subjectId]));
+  const tm = r.placements.filter((p) => /^(th|ma)/.test(sub.get(p.assignmentId)));
+  return (100 * tm.filter((p) => p.period > brk).length) / tm.length;
+};
+
+await test('ก-8 ไม่ส่ง group = ผลเท่าเดิม 100% · ส่ง group แต่ weights ปิด (0) = ผลเท่าไม่มี group', () => {
+  for (const mk of [primaryFit6, primaryWide]) {
+    const plain = solve(mk(), { seed: 1, timeLimitMs: 4000 });
+    const off = solve(withGroups(mk()), { seed: 1, timeLimitMs: 4000, weights: { morningCore: 0, classGap: 0 } });
+    assert.equal(JSON.stringify(off.placements), JSON.stringify(plain.placements));
+    assert.equal(plain.stats.softScore, score(mk(), plain.placements).softScore);
+  }
+});
+
+await test('ก-8 ประถม + group: ไทย/คณิตตกบ่าย ≤ 15% · ห้องไม่มีคาบว่างกลางวัน · hard 0 · incremental ตรง (debugCheck)', () => {
+  const out = [];
+  for (const mk of [primaryFit6, primaryWide]) for (const seed of [1, 7]) {
+    const base = mk(), d = withGroups(mk());
+    const t0 = now(); const r0 = solve(base, { seed, timeLimitMs: 4000 }); const ms0 = now() - t0;
+    const t1 = now(); const r = solve(d, { seed, timeLimitMs: 4000, debugCheck: true }); const ms1 = now() - t1;
+    assert.equal(r.unplaced.length, 0); assert.equal(validate(d, r.placements).length, 0);
+    const pct = afternoonPct(d, r);
+    assert.ok(pct <= 15, `ไทย/คณิตตกบ่าย ${pct.toFixed(0)}% (เดิม ${afternoonPct(base, r0).toFixed(0)}%)`);
+    assert.equal(r.stats.soft.classGaps, 0, JSON.stringify(r.stats.soft));
+    assert.ok(ms1 < 1000, `ช้าเกิน ${ms1.toFixed(0)} ms`);
+    out.push(`${mk.name} s${seed}: บ่าย ${afternoonPct(base, r0).toFixed(0)}→${pct.toFixed(0)}% · ช่องว่างห้อง ${r0.stats.soft.classGaps}→0 · ${ms0.toFixed(0)}→${ms1.toFixed(0)} ms`);
+  }
+  return out.join('\n    ');
 });
 
 console.log(`\nผ่าน ${passed} / ${passed + failed}`);

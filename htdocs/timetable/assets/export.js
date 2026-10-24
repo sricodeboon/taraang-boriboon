@@ -2,11 +2,12 @@
 import { store, idx, DAY_NAMES, lockAt, esc, assignmentLabel } from './store.js';
 import { orientation, ORIENTS } from './rules.js';
 import * as notify from './notify.js';
+import * as motion from './motion.js';
 // pdf.js โหลดเมื่อกดส่งออกครั้งแรกเท่านั้น
 const pdfModule = () => import('./pdf.js');
 
 let root = null;
-let perPage = 1, paper = 'A4';
+let perPage = 1, paper = null; // paper null = ตามขนาดโรงเรียน (ห้อง×คาบ > 36 → A3)
 
 // ---------- กล่องเลี้ยงโอวัลติน + ฟอร์มข้อเสนอแนะรุ่นย่อ (app.php วาง #tt-support ไว้นอก <main>) ----------
 // ย้ายทั้งก้อนมาท้ายแท็บ (ไม่สร้างใหม่) → ปุ่มที่ home.js ผูกไว้และข้อความที่พิมพ์ค้างอยู่ครบ
@@ -48,6 +49,11 @@ export function render(el) {
   root = el;
   const d = store.doc;
   const o = orientation(d);
+  const autoPaper = autoPaperOf(d);
+  const curPaper = paper || autoPaper;
+  if (mine && !d.teachers.some((t) => t.id === mine)) mine = null;
+  const share = canShareFiles();
+  css();
   support()?.remove(); // เอาออกก่อน innerHTML ใหม่ ไม่งั้นกล่องถูกลบทิ้งไปกับเนื้อหาเดิม
   el.innerHTML = `<div class="card export-orient">
       <div><b>แนวตารางรายห้อง / รายครู</b>
@@ -56,28 +62,49 @@ export function render(el) {
     </div>
     <div class="export-grid">
     <div class="card">
-      <h3 style="font-size:1.05rem">Excel (.xlsx)</h3>
-      <p class="muted" style="margin:0">ชีตตารางรวมทั้งโรงเรียน ชีตรายห้อง ชีตรายครู และสรุปภาระสอน มีเส้นตาราง สีวิชา และโลโก้ พร้อมพิมพ์ A4 แนวนอน</p>
-      <button class="btn btn-primary" id="x-xlsx">ดาวน์โหลด Excel</button>
-    </div>
-    <div class="card">
       <h3 style="font-size:1.05rem">PDF รายห้อง / รายครู</h3>
-      <p class="muted" style="margin:0">ดาวน์โหลดเป็นไฟล์ .pdf ทันที เลือกย่อหลายตารางต่อหน้าเพื่อประหยัดกระดาษได้</p>
+      <p class="muted" style="margin:0">หัวกระดาษมีชื่อโรงเรียน ภาคเรียน ครูประจำชั้น และคำอธิบายสีท้ายตาราง · เลือกย่อหลายตารางต่อหน้าเพื่อประหยัดกระดาษได้</p>
       <div class="seg-row" role="radiogroup" aria-label="จำนวนตารางต่อหน้า">
         ${[[1, '1 ตาราง/หน้า'], [2, '2 ตาราง/หน้า'], [4, '4 ตาราง/หน้า']].map(([n, t]) => `<label><input type="radio" name="per" value="${n}" ${n === perPage ? 'checked' : ''}> ${t}</label>`).join('')}
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn" data-pdf="class" data-mode="each">ตารางเรียนทุกห้อง (${d.classes.length})</button>
+      <div class="x-row">
+        <button class="btn btn-primary" data-pdf="class" data-mode="each">ตารางเรียนทุกห้อง (${d.classes.length})</button>
         <button class="btn" data-pdf="teacher" data-mode="each">ตารางสอนครูทุกคน (${d.teachers.length})</button>
+      </div>
+      <div class="x-tools" role="group" aria-label="ดูก่อน พิมพ์ หรือส่งต่อ">
+        <label class="muted" for="x-set">ดูก่อน / พิมพ์ / ส่ง:</label>
+        <select id="x-set" class="input input-sm"><option value="class"${set === 'class' ? ' selected' : ''}>ตารางเรียนทุกห้อง</option><option value="teacher"${set === 'teacher' ? ' selected' : ''}>ตารางสอนครูทุกคน</option></select>
+        <button class="btn btn-sm" data-x="preview">${ICON.eye}ดูตัวอย่าง</button>
+        <button class="btn btn-sm" data-x="print">${ICON.print}พิมพ์</button>
+        ${share ? `<button class="btn btn-sm" data-x="share">${ICON.share}ส่งเข้า LINE / แชร์</button>` : ''}
       </div>
     </div>
     <div class="card">
-      <h3 style="font-size:1.05rem">ตารางรวมทั้งโรงเรียน (หน้าเดียว)</h3>
-      <p class="muted" style="margin:0">ทุกห้องหรือทุกครูในแผ่นเดียว แต่ละช่องแสดงรหัสวิชากับชื่อย่อครู เหมาะติดบอร์ดห้องวิชาการ</p>
-      <div class="seg-row" role="radiogroup" aria-label="ขนาดกระดาษ">
-        ${['A4', 'A3'].map((x) => `<label><input type="radio" name="paper" value="${x}" ${x === paper ? 'checked' : ''}> ${x} แนวนอน</label>`).join('')}
+      <h3 style="font-size:1.05rem">ตารางสอนของฉัน · แจกครู</h3>
+      <p class="muted" style="margin:0">เลือกครู ได้ PDF 1 หน้า (สอน/ว่างกี่คาบ ประจำชั้นไหน) ส่งเข้า LINE ให้ครูแต่ละคนได้จากมือถือ</p>
+      ${d.teachers.length ? `<div class="x-tools">
+        <label class="muted" for="x-mine">ครู</label>
+        <select id="x-mine" class="input input-sm">${d.teachers.map((t) => `<option value="${esc(t.id)}"${t.id === mine ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div class="x-row">
+        <button class="btn btn-primary" data-mine="pdf">ดาวน์โหลด PDF ของครูคนนี้</button>
+        <button class="btn btn-sm" data-mine="preview">${ICON.eye}ดูตัวอย่าง</button>
+        ${share ? `<button class="btn btn-sm" data-mine="share">${ICON.share}ส่งเข้า LINE / แชร์</button>` : ''}
+      </div>` : '<p class="hint" style="margin:0">ยังไม่มีครู — เพิ่มที่ ข้อมูล → ครู</p>'}
+    </div>
+    <div class="card">
+      <h3 style="font-size:1.05rem">Excel (.xlsx)</h3>
+      <p class="muted" style="margin:0">ชีตแรก “สรุป” (คาบต่อครู/ห้อง และคาบว่าง) ตามด้วยตารางรวม รายห้อง และรายครู มีเส้นตาราง สีวิชา โลโก้ หัวตารางตรึงไว้ พร้อมพิมพ์ A4 แนวนอน</p>
+      <div class="x-row"><button class="btn btn-primary" id="x-xlsx">ดาวน์โหลด Excel</button></div>
+    </div>
+    <div class="card">
+      <h3 style="font-size:1.05rem">ตารางรวมทั้งโรงเรียน</h3>
+      <p class="muted" style="margin:0">ทุกห้องหรือทุกครูในแผ่นเดียว แต่ละช่องแสดงชื่อย่อวิชากับชื่อย่อครู เหมาะติดบอร์ดห้องวิชาการ</p>
+      <div class="seg-row" role="radiogroup" aria-label="ขนาดกระดาษ">
+        ${['A4', 'A3'].map((x) => `<label><input type="radio" name="paper" value="${x}" ${x === curPaper ? 'checked' : ''}> ${x} แนวนอน${x === autoPaper ? ' <span class="muted">(แนะนำ)</span>' : ''}</label>`).join('')}
+        <label><input type="checkbox" name="split" ${split ? 'checked' : ''}> แยก 2 หน้า (${esc(halfDays(d))})</label>
+      </div>
+      <div class="x-row">
         <button class="btn" data-pdf="class" data-mode="overview">รวมทุกห้อง</button>
         <button class="btn" data-pdf="teacher" data-mode="overview">รวมครูทุกคน</button>
       </div>
@@ -85,7 +112,7 @@ export function render(el) {
     <div class="card">
       <h3 style="font-size:1.05rem">สำรองข้อมูล</h3>
       <p class="muted" style="margin:0">เก็บไฟล์ .json ไว้ในเครื่อง นำกลับมาใช้ภายหลังหรือย้ายไปภาคเรียนอื่นได้</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div class="x-row">
         <button class="btn" id="b-save">ดาวน์โหลดไฟล์สำรอง</button>
         <label class="btn">นำเข้าไฟล์สำรอง<input type="file" id="b-load" accept=".json,application/json" hidden></label>
       </div>
@@ -97,14 +124,86 @@ export function render(el) {
     store.commit('settings');
     notify.ok(`เปลี่ยนเป็น “${b.textContent}” แล้ว`, 2500);
   }));
-  el.querySelector('#x-xlsx').addEventListener('click', exportXlsx);
+  el.querySelector('#x-xlsx').addEventListener('click', (e) => exportXlsx(e.currentTarget));
   el.querySelectorAll('input[name=per]').forEach((r) => r.addEventListener('change', () => { perPage = +r.value; }));
   el.querySelectorAll('input[name=paper]').forEach((r) => r.addEventListener('change', () => { paper = r.value; }));
+  el.querySelector('input[name=split]')?.addEventListener('change', (e) => { split = e.target.checked; });
+  el.querySelector('#x-set').addEventListener('change', (e) => { set = e.target.value === 'teacher' ? 'teacher' : 'class'; });
+  el.querySelector('#x-mine')?.addEventListener('change', (e) => { mine = e.target.value; });
   el.querySelectorAll('[data-pdf]').forEach((b) => b.addEventListener('click', () => exportPdf(b)));
+  el.querySelectorAll('[data-x]').forEach((b) => b.addEventListener('click', () => tool(b.dataset.x, b, { kind: set, mode: 'each', perPage })));
+  el.querySelectorAll('[data-mine]').forEach((b) => b.addEventListener('click', () => {
+    const id = mine || el.querySelector('#x-mine')?.value;
+    if (!id) return;
+    const opts = { kind: 'teacher', mode: 'each', perPage: 1, ids: [id] };
+    if (b.dataset.mine === 'pdf') exportPdf(b, opts); else tool(b.dataset.mine, b, opts);
+  }));
   el.querySelector('#b-save').addEventListener('click', backup);
   el.querySelector('#b-load').addEventListener('change', restore);
   placeSupport(el);
 }
+
+// ---------- ตัวช่วยของแท็บ ----------
+let set = 'class', mine = null, split = false;
+// ป้าย (แนะนำ) ใช้ร่วมกันทั้งปุ่ม "รวมทุกห้อง" และ "รวมครูทุกคน" → คิดจากฝั่งที่มากกว่า (ห้องหรือครู) × คาบเรียน > 36 = A3
+// ตรงกับ pdf.js defaultPaper(kind) ของปุ่มที่หนักกว่า และสิ่งที่ติ๊กไว้ = กระดาษที่ได้จริง (ไม่มี A4 ตัวเล็กเพราะครูเยอะกว่าห้อง)
+const autoPaperOf = (d) => (Math.max(d.classes.length, d.teachers.length) * d.term.periods.filter((p) => p.type !== 'break').length > 36 ? 'A3' : 'A4');
+const halfDays = (d) => { const n = d.term.days, h = Math.ceil(n / 2); return n > 1 ? `${DAY_NAMES[0]}–${DAY_NAMES[h - 1]} / ${DAY_NAMES[h]}–${DAY_NAMES[n - 1]}` : DAY_NAMES[0]; };
+const narrow = () => !!window.matchMedia?.('(max-width: 560px)').matches;
+let shareOk = null;
+/** แชร์ไฟล์ได้ไหม (มือถือส่วนใหญ่ได้ → LINE/Messenger/อีเมล) · ไม่ได้ = ไม่แสดงปุ่ม */
+function canShareFiles() {
+  if (shareOk !== null) return shareOk;
+  try { shareOk = typeof navigator.share === 'function' && !!navigator.canShare?.({ files: [new File(['x'], 'x.pdf', { type: 'application/pdf' })] }); } catch { shareOk = false; }
+  return shareOk;
+}
+const ICON = {
+  eye: '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 5c5 0 9 4.5 10 7-1 2.5-5 7-10 7S3 14.5 2 12c1-2.5 5-7 10-7zm0 3a4 4 0 100 8 4 4 0 000-8zm0 2a2 2 0 110 4 2 2 0 010-4z"/></svg>',
+  print: '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 3h10v4H7zM5 8h14a2 2 0 012 2v6h-4v4H7v-4H3v-6a2 2 0 012-2zm4 7v3h6v-3z"/></svg>',
+  share: '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M18 16a3 3 0 00-2.4 1.2l-6.7-3.4a3 3 0 000-1.6l6.7-3.4A3 3 0 1015 7c0 .3 0 .5.1.8L8.4 11.2a3 3 0 100 3.6l6.7 3.4A3 3 0 1018 16z"/></svg>',
+  file: (ext) => `<span class="fly-file" aria-hidden="true"><svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 2h8l6 6v14H6zm8 1.5V9h5.5"/></svg>${ext}</span>`,
+};
+function css() {
+  if (document.getElementById('tt-export-css')) return;
+  const s = document.createElement('style');
+  s.id = 'tt-export-css';
+  s.textContent = `.x-row{display:flex;gap:8px;flex-wrap:wrap}
+.x-tools{display:flex;gap:6px 8px;flex-wrap:wrap;align-items:center;padding-top:10px;border-top:1px solid var(--line)}
+.x-tools .input-sm{width:auto;max-width:100%;min-width:0;padding:5px 10px}
+.x-tools .btn svg,.x-row .btn svg{flex:none}
+.dlg.pdf-dlg{width:min(980px,calc(100vw - 24px));max-height:calc(100vh - 24px);padding:14px;display:grid;gap:10px}
+.pdf-dlg[open]{display:grid}
+.pdf-dlg .pdf-prev{display:block;width:100%;height:min(70vh,640px);border:1px solid var(--line);border-radius:10px;background:#E9EDF1}
+.pdf-dlg .pdf-head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}.pdf-dlg .pdf-head h3{font-size:1.05rem;flex:1;min-width:0;overflow-wrap:anywhere}
+.pdf-dlg .x-row{justify-content:flex-end}`;
+  document.head.appendChild(s);
+}
+
+/** ไฟล์พร้อม → ไอคอนไฟล์บินลงมุมล่างขวา (เหมือนลงถาดดาวน์โหลด) · ลดภาพเคลื่อนไหว = ข้าม */
+function flyFile(btn, ext) {
+  if (!btn?.isConnected || motion.still()) return;
+  const dock = Object.assign(document.createElement('i'), { className: 'fly-dock' });
+  dock.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(dock);
+  motion.flyTo(btn, dock, { html: ICON.file(ext), dur: 600 }).finally(() => dock.remove());
+}
+
+// ครูบูรณ์ (mascot.js) สั่งงานแท็บนี้: tt:goto { tab:'export', action:'pdf-all' | 'share' } — รอ app.js วาดแท็บก่อนแล้วกดปุ่มจริง (เห็นสถานะ busy เหมือนกดเอง)
+document.addEventListener('tt:goto', (e) => {
+  const g = e.detail || {};
+  if (g.tab !== 'export' || !g.action) return;
+  requestAnimationFrame(() => {
+    if (!root?.isConnected || root.hidden) return;
+    if (g.action === 'pdf-all') {
+      const b = root.querySelector('[data-pdf="class"][data-mode="each"]');
+      if (b) { b.scrollIntoView({ block: 'center' }); exportPdf(b); }
+    } else if (g.action === 'share') {
+      const b = root.querySelector('[data-x="share"]') || root.querySelector('[data-pdf="class"][data-mode="each"]');
+      if (!b) return;
+      if (b.dataset.x === 'share') tool('share', b, { kind: 'class', mode: 'each', perPage }); else exportPdf(b);
+    }
+  });
+});
 
 // ---------- Excel (ExcelJS: มีเส้นตาราง สีวิชา โลโก้ และตั้งหน้ากระดาษพร้อมพิมพ์) ----------
 const EXCELJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
@@ -293,16 +392,17 @@ function overviewSheet(wb, used, kind, m, logoId, tint) {
     const c = ws.getRow(r).getCell(2 + k * perDay); c.border = { ...c.border, left: med };
   }
   ws.views = [{ state: 'frozen', xSplit: 1, ySplit: top + 1 }];
-  pageSetup(ws, { fitHeight: 0, paper: paper === 'A3' ? 8 : 9 });
+  pageSetup(ws, { fitHeight: 0, paper: (paper || autoPaperOf(store.doc)) === 'A3' ? 8 : 9 }); // ไม่ได้เลือกเอง = ตามที่ติ๊ก (แนะนำ) ไว้
 }
 
-async function exportXlsx() {
+async function exportXlsx(btn) {
   const d = store.doc;
   if (!d.classes.length) { notify.warn('ยังไม่มีห้องเรียน'); return; }
-  const busy = notify.loading('กำลังสร้างไฟล์ Excel…');
   let name;
-  try { name = await buildXlsx(d); } catch (e) { busy.close(); notify.error('สร้าง Excel ไม่สำเร็จ: ' + e.message); console.error(e); return; }
-  busy.close();
+  try { name = await notify.busy(btn, () => buildXlsx(d), { label: 'กำลังเตรียม' }); }
+  catch (e) { notify.error('สร้าง Excel ไม่สำเร็จ: ' + e.message); console.error(e); return; }
+  if (!name) return;
+  flyFile(btn, 'XLSX');
   notify.ok('สร้าง Excel เสร็จ ดาวน์โหลดแล้ว: ' + name, 5000);
 }
 
@@ -313,20 +413,10 @@ async function buildXlsx(d) {
   wb.creator = 'ตารางบริบูรณ์';
   const logoId = logo ? wb.addImage({ base64: logo, extension: logo.startsWith('data:image/jpeg') ? 'jpeg' : 'png' }) : null;
   const used = new Set();
+  summarySheet(wb, used, d, logoId);
   for (const kind of ['class', 'teacher']) overviewSheet(wb, used, kind, pdf.overviewMatrix(kind), logoId, pdf.tint);
   for (const c of d.classes) entitySheet(wb, used, 'class', c, logoId, pdf.tint);
   for (const t of d.teachers) entitySheet(wb, used, 'teacher', t, logoId, pdf.tint);
-
-  const ws = wb.addWorksheet(sheetName('สรุปภาระสอน', used));
-  ws.columns = [{ width: 32 }, { width: 26 }, { width: 18 }];
-  const top = sheetHeader(ws, 'สรุปภาระสอน', 3, logoId);
-  const rows = [['ครู', 'คาบที่ได้รับมอบหมาย/สัปดาห์', 'จัดลงตารางแล้ว'], ...d.teachers.map((t) => [
-    t.name,
-    d.assignments.filter((a) => a.teacherId === t.id).reduce((n, a) => n + (a.perWeek || 0), 0),
-    d.placements.filter((p) => idx.asg.get(p.assignmentId)?.teacherId === t.id).length,
-  ])];
-  rows.forEach((row, i) => row.forEach((v, j) => { const c = ws.getRow(top + i).getCell(j + 1); c.value = v; styleCell(c, { fill: i ? null : XL.head, bold: !i, center: j > 0 }); }));
-  pageSetup(ws, { fitHeight: 0 });
 
   const buf = await wb.xlsx.writeBuffer();
   const name = `ตารางเรียน-${safeFile(window.TT?.school?.name)}-${safeFile(d.term.name)}.xlsx`;
@@ -338,18 +428,109 @@ async function buildXlsx(d) {
 
 const safeFile = (s) => String(s || '').replace(/[\\/:*?"<>|]/g, '-').trim() || 'ตาราง';
 
+/** ชีตแรก "สรุป": ครูแต่ละคน (มอบหมาย / จัดแล้ว / คาบว่าง) และห้องเรียน (มอบหมาย / จัดแล้ว / ช่องว่าง) · ตรึงหัวตาราง */
+function summarySheet(wb, used, d, logoId) {
+  const ws = wb.addWorksheet(sheetName('สรุป', used));
+  ws.columns = [{ width: 30 }, { width: 22 }, { width: 18 }, { width: 16 }];
+  const top = sheetHeader(ws, 'สรุปภาระสอนและตาราง', 4, logoId);
+  const slots = d.term.days * d.term.periods.filter((p) => p.type !== 'break').length;
+  const placedBy = (key, id) => d.placements.filter((p) => idx.asg.get(p.assignmentId)?.[key] === id).length;
+  const lockN = (c) => d.locks.filter((l) => l.classId == null || l.classId === c.id).length;
+  const block = (r0, head, rows) => {
+    [head, ...rows].forEach((row, i) => row.forEach((v, j) => { const c = ws.getRow(r0 + i).getCell(j + 1); c.value = v; styleCell(c, { fill: i ? null : XL.head, bold: !i, center: j > 0 }); }));
+    return r0 + rows.length + 2;
+  };
+  let r = block(top, ['ครู', 'คาบที่ได้รับมอบหมาย/สัปดาห์', 'จัดลงตารางแล้ว', 'คาบว่าง'], d.teachers.map((t) => {
+    const placed = placedBy('teacherId', t.id);
+    return [t.name, d.assignments.filter((a) => a.teacherId === t.id).reduce((n, a) => n + (a.perWeek || 0), 0), placed, Math.max(0, slots - placed)];
+  }));
+  block(r, ['ห้องเรียน', 'คาบที่มอบหมาย/สัปดาห์', 'จัดลงตารางแล้ว', 'ช่องว่าง (ไม่รวมคาบล็อก)'], d.classes.map((c) => {
+    const placed = placedBy('classId', c.id);
+    return [c.name, d.assignments.filter((a) => a.classId === c.id).reduce((n, a) => n + (a.perWeek || 0), 0), placed, Math.max(0, slots - placed - lockN(c))];
+  }));
+  ws.views = [{ state: 'frozen', xSplit: 1, ySplit: top }];
+  pageSetup(ws, { fitHeight: 0 });
+}
+
 // ---------- PDF ----------
-async function exportPdf(btn) {
-  if (btn.disabled) return;
-  const old = btn.textContent;
-  btn.disabled = true; btn.textContent = 'กำลังสร้าง PDF…';
-  const busy = notify.loading('กำลังสร้าง PDF…');
+/** ดาวน์โหลด PDF: ปุ่มหมุน (กันกดซ้ำ) → เช็ก + ไอคอนไฟล์บินลงมุมล่างขวา → toast ชื่อไฟล์ */
+async function exportPdf(btn, opts = { kind: btn.dataset.pdf, mode: btn.dataset.mode, perPage, paper: paper || autoPaperOf(store.doc), split }) {
+  if (btn.disabled || btn.classList.contains('btn-busy')) return;
+  let name;
   try {
-    const name = await (await pdfModule()).downloadPdf({ kind: btn.dataset.pdf, mode: btn.dataset.mode, perPage, paper });
-    busy.close();
-    notify.ok('สร้าง PDF เสร็จ ดาวน์โหลดแล้ว: ' + name, 5000);
-  } catch (e) { busy.close(); notify.error('สร้าง PDF ไม่สำเร็จ: ' + e.message); console.error(e); }
-  finally { btn.disabled = false; btn.textContent = old; }
+    name = await notify.busy(btn, async () => (await pdfModule()).downloadPdf(opts), { label: 'กำลังเตรียม' });
+  } catch (e) { notify.error('สร้าง PDF ไม่สำเร็จ: ' + e.message); console.error(e); return; }
+  if (!name) return;
+  flyFile(btn, 'PDF');
+  notify.ok('สร้าง PDF เสร็จ ดาวน์โหลดแล้ว: ' + name, 5000);
+}
+
+/** URL ไฟล์ PDF ชั่วคราว (ลบทิ้งหลัง 60 วิ — เปิดดู/พิมพ์ทันพอ ไม่ค้างหน่วยความจำ) */
+function tempUrl(blob) {
+  const url = URL.createObjectURL(blob);
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return url;
+}
+
+/**
+ * ดูตัวอย่าง / พิมพ์ / แชร์ ชุดที่เลือก
+ * - ดูตัวอย่าง: จอกว้าง = กล่องในหน้า (HTML ของเอกสารเดียวกัน ใน iframe sandbox) · มือถือ = เปิดไฟล์ PDF จริงในแท็บใหม่
+ * - พิมพ์: เปิดไฟล์ PDF ในแท็บใหม่ ให้ตัวดู PDF ของเบราว์เซอร์พิมพ์ (ไม่ใช้ window.print() ของหน้าเว็บ)
+ * - แชร์: Web Share พร้อมไฟล์ (LINE / Messenger / อีเมล) — แสดงปุ่มเฉพาะเครื่องที่ทำได้
+ */
+async function tool(what, btn, opts) {
+  if (what === 'preview' && !narrow()) return previewDialog(btn, opts);
+  if (what === 'share') return sharePdf(btn, opts);
+  // เปิดแท็บใหม่ทันทีตอนกด (ยังอยู่ในจังหวะคลิกของผู้ใช้ ตัวกันป๊อปอัปไม่บล็อก) แล้วค่อยใส่ไฟล์เมื่อสร้างเสร็จ
+  const w = window.open('', '_blank');
+  try { if (w) { w.document.title = 'กำลังเตรียม PDF…'; w.document.body.textContent = 'กำลังเตรียม PDF…'; } } catch { /* แท็บใหม่บางเบราว์เซอร์แตะไม่ได้ */ }
+  let out;
+  try { out = await notify.busy(btn, async () => (await pdfModule()).buildPdf(opts), { label: 'กำลังเตรียม', done: 'เปิดแล้ว' }); }
+  catch (e) { try { w?.close(); } catch { /* */ } notify.error('สร้าง PDF ไม่สำเร็จ: ' + e.message); console.error(e); return; }
+  if (!out) { try { w?.close(); } catch { /* */ } return; }
+  const url = tempUrl(out.blob);
+  if (w && !w.closed) { w.location.href = url; notify.ok(what === 'print' ? 'เปิดไฟล์ในแท็บใหม่แล้ว กดพิมพ์จากตัวดู PDF ได้เลย' : 'เปิดไฟล์ในแท็บใหม่แล้ว', 4000); return; }
+  notify.action('PDF พร้อมแล้ว: ' + out.name, 'เปิดไฟล์', () => { window.open(url, '_blank'); }, 15000);
+}
+
+async function sharePdf(btn, opts) {
+  let out;
+  try { out = await notify.busy(btn, async () => (await pdfModule()).buildPdf(opts), { label: 'กำลังเตรียม', done: 'พร้อมส่ง' }); }
+  catch (e) { notify.error('สร้าง PDF ไม่สำเร็จ: ' + e.message); console.error(e); return; }
+  if (!out) return;
+  const file = new File([out.blob], out.name, { type: 'application/pdf' });
+  const go = () => navigator.share({ files: [file], title: out.name.replace(/\.pdf$/, '') });
+  try { await go(); }
+  catch (e) {
+    if (e?.name === 'AbortError') return; // ผู้ใช้ปิดหน้าต่างแชร์เอง
+    // สร้างไฟล์นานจนจังหวะคลิกหมดอายุ → ให้กดอีกครั้งเพื่อแชร์ (ได้จังหวะคลิกใหม่)
+    if (e?.name === 'NotAllowedError') { notify.action('ไฟล์พร้อมแล้ว: ' + out.name, 'แชร์', () => go().catch(() => {}), 15000); return; }
+    notify.error('แชร์ไม่สำเร็จ: ' + (e?.message || e));
+  }
+}
+
+/** กล่องดูตัวอย่าง: หน้าแรก ๆ ของเอกสารเดียวกับไฟล์จริง · ปุ่มเปิดไฟล์จริง/ดาวน์โหลด */
+async function previewDialog(btn, opts) {
+  let p;
+  try { p = await notify.busy(btn, async () => (await pdfModule()).previewHtml(opts), { label: 'กำลังเตรียม', done: 'เปิดแล้ว' }); }
+  catch (e) { notify.error('ดูตัวอย่างไม่สำเร็จ: ' + e.message); console.error(e); return; }
+  if (!p) return;
+  const dlg = document.createElement('dialog');
+  dlg.className = 'card dlg pdf-dlg';
+  dlg.setAttribute('aria-label', 'ตัวอย่าง ' + p.name);
+  dlg.innerHTML = `<div class="pdf-head"><h3>${esc(p.name.replace(/\.pdf$/, ''))}</h3><span class="muted" style="font-size:.86rem">ตัวอย่าง ${p.pages}${p.total > p.pages ? ` จาก ${p.total}` : ''} หน้า · หน้าตาใกล้เคียงไฟล์จริง</span></div>
+    <iframe class="pdf-prev" sandbox title="ตัวอย่างไฟล์ PDF"></iframe>
+    <div class="x-row"><button type="button" class="btn" data-close>ปิด</button><button type="button" class="btn" data-open>${ICON.print}เปิดไฟล์จริง / พิมพ์</button><button type="button" class="btn btn-primary" data-dl>ดาวน์โหลด PDF</button></div>`;
+  document.body.appendChild(dlg);
+  dlg.addEventListener('close', () => dlg.remove(), { once: true });
+  dlg.querySelector('[data-close]').addEventListener('click', () => dlg.close());
+  dlg.querySelector('[data-open]').addEventListener('click', (e) => tool('print', e.currentTarget, opts));
+  dlg.querySelector('[data-dl]').addEventListener('click', (e) => exportPdf(e.currentTarget, opts));
+  dlg.showModal();
+  const frame = dlg.querySelector('.pdf-prev');
+  // ย่อหน้ากระดาษให้พอดีความกว้างกล่อง (zoom ภายในเอกสารตัวอย่าง)
+  const k = Math.min(1, Math.max(0.3, (frame.clientWidth - 30) / p.width));
+  frame.srcdoc = p.html.replace('</style>', `.page{zoom:${k.toFixed(3)}}</style>`);
 }
 
 // ---------- สำรอง / นำเข้า ----------

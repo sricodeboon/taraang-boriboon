@@ -1,0 +1,48 @@
+/* motion.css ระบบแอนิเมชันกลาง (ฝังทุกหน้าผ่าน page_head) · keyframes m-* ประกาศที่นี่ที่เดียว · คู่มือ docs/redesign-2026-10/MOTION-API.md
+   --m = ตัวคูณเวลา (0 ใต้ reduced-motion / html.tt-still ⇒ เฟรมสุดท้ายทันที ข้อมูลยังครบ) */
+:root{--m:1;
+--d-1:calc(120ms*var(--m));--d-2:calc(200ms*var(--m));--d-3:calc(320ms*var(--m));--d-4:calc(520ms*var(--m));--d-5:calc(800ms*var(--m));
+--e-out:cubic-bezier(.2,.8,.2,1);--e-in:cubic-bezier(.4,0,1,1);--e-io:cubic-bezier(.65,0,.35,1);
+--spring-soft:linear(0,.013,.05 2.6%,.188 6.5%,.479 12.6%,.742 19.1%,.869 23.2%,.961 27.5%,1.012 31.9%,1.038 36.7%,1.044 42.4%,1.025 56.5%,1.004 76.3%,1);
+--spring-pop:linear(0,.009,.035 2.1%,.141,.281 6.7%,.723 12.9%,.938 16.7%,1.017,1.077,1.121,1.149 24.3%,1.159,1.163,1.161,1.154 29.9%,1.129 32.8%,1.051 39.6%,1.017 43.1%,.991,.977 51%,.974 53.8%,.975 57.1%,.997 69.8%,1.003 76.9%,1);
+--lift:0 10px 24px rgba(15,36,56,.18),0 2px 6px rgba(15,36,56,.10);
+--glow-gold:0 0 0 3px rgba(227,184,90,.45),0 0 18px rgba(227,184,90,.35);
+--glow-sky:0 0 0 3px rgba(127,176,232,.45);--glow-red:0 0 0 3px rgba(192,57,43,.35)}
+@supports not (animation-timing-function:linear(0,1)){:root{--spring-soft:var(--e-out);--spring-pop:cubic-bezier(.34,1.56,.64,1)}}
+@media (prefers-reduced-motion:reduce){:root{--m:0}}
+html.tt-still{--m:0}
+
+@keyframes m-in{from{opacity:0;transform:translateY(8px)}}
+@keyframes m-in-l{from{opacity:0;transform:translateX(-10px)}}
+@keyframes m-out{to{opacity:0;transform:translateY(6px)}}
+@keyframes m-land{0%{opacity:0;transform:translateY(-12px) scale(.9)}}
+@keyframes m-pop{0%{transform:scale(.6)}}
+@keyframes m-shake{20%,60%{transform:translateX(-3px)}40%,80%{transform:translateX(3px)}}
+@keyframes m-pulse{from{box-shadow:0 0 0 0 rgba(227,184,90,.55)}to{box-shadow:0 0 0 14px rgba(227,184,90,0)}}
+@keyframes m-breathe{50%{transform:translateY(-3px) scale(1.012)}}
+@keyframes m-nod{30%{transform:rotate(-2deg)}65%{transform:rotate(1.2deg)}}
+@keyframes m-flash{from{background-color:var(--gold-soft,#FBF1DC)}}
+@keyframes m-sheen{from{transform:translateX(-120%)}to{transform:translateX(120%)}}
+@keyframes m-spin{to{transform:rotate(360deg)}}
+
+.m-in{animation:m-in var(--d-3) var(--e-out) both}
+.m-in-l{animation:m-in-l var(--d-3) var(--e-out) both}
+.m-out{animation:m-out var(--d-2) var(--e-in) forwards}
+.m-land{animation:m-land var(--d-4) var(--spring-soft) both}
+.m-pop{animation:m-pop var(--d-3) var(--spring-pop) both}
+.m-shake{animation:m-shake calc(360ms*var(--m)) var(--e-io)}
+.m-pulse{animation:m-pulse calc(1.4s*var(--m)) var(--e-out) 3}
+.m-breathe{animation:m-breathe calc(5s*var(--m)) var(--e-io) infinite}
+.m-nod{animation:m-nod calc(600ms*var(--m)) var(--e-io);transform-origin:50% 100%}
+.m-flash{animation:m-flash var(--d-5) var(--e-out) both}
+.m-spin{animation:m-spin .8s linear infinite}
+.m-stagger>*{animation-delay:calc(var(--i,0)*var(--step,24ms)*var(--m))}
+.m-sheen{position:relative;overflow:hidden}
+.m-sheen::after{content:"";position:absolute;inset:0;pointer-events:none;transform:translateX(-120%);background:linear-gradient(60deg,transparent 30%,rgba(255,255,255,.45) 50%,transparent 70%)}
+@media (hover:hover){.m-sheen:hover::after{animation:m-sheen calc(700ms*var(--m)) var(--e-out)}}
+.m-ghost{position:fixed;left:0;top:0;margin:0;pointer-events:none;z-index:80;will-change:transform;transform-origin:0 0}
+.m-hint-still{outline:2px solid #E3B85A;outline-offset:2px}
+.m-confetti{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:5}
+.m-confetti i{position:absolute;top:0;border-radius:2px}
+@media (prefers-reduced-motion:reduce){.m-breathe,.m-spin,.btn-busy::before{animation:none}}
+html.tt-still .m-breathe,html.tt-still .m-spin,html.tt-still .btn-busy::before{animation:none}

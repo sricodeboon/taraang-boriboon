@@ -39,12 +39,35 @@ button, input, select, textarea { font:inherit; color:inherit; }
 /* ปุ่ม */
 .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:9px 16px; border-radius:999px;
        border:1px solid var(--line); background:var(--surface); cursor:pointer; text-decoration:none; font-weight:500;
-       color:var(--ink); transition:background .15s, border-color .15s, transform .1s; white-space:nowrap; }
+       color:var(--ink); white-space:nowrap;
+       transition:background var(--d-1,120ms), border-color var(--d-1,120ms), transform var(--d-1,120ms) var(--e-out,ease-out), box-shadow var(--d-2,200ms); }
 .btn:hover { border-color:var(--blue); }
-.btn:active { transform:scale(.98); }
+/* ยกเบา ๆ เฉพาะอุปกรณ์ที่มีเมาส์ (จอสัมผัสไม่ค้างสถานะ hover) · กดแล้วยุบ · ไม่เปลี่ยนขนาดกล่อง (transform) จึงไม่มี CLS */
+@media (hover:hover) { .btn:not([disabled]):hover { transform:translateY(-1px); box-shadow:var(--shadow); } }
+.btn:not([disabled]):active { transform:scale(.97); box-shadow:none; }
 .btn[disabled] { opacity:.5; cursor:not-allowed; }
-.btn-primary { background:var(--gold-bg); border-color:var(--gold-bg); color:#0F2438; font-weight:600; }
+.btn-primary { background:var(--gold-bg); border-color:var(--gold-bg); color:#0F2438; font-weight:600; position:relative; overflow:hidden; }
 .btn-primary:hover { background:#EDC56C; border-color:#EDC56C; }
+/* ปุ่มหลัก: เงาทอง + แสงวาบผ่าน 1 ครั้งต่อการชี้ (keyframes m-sheen ของ motion.css) */
+.btn-primary::after { content:""; position:absolute; inset:0; pointer-events:none; transform:translateX(-120%);
+  background:linear-gradient(60deg,transparent 30%,rgba(255,255,255,.45) 50%,transparent 70%); }
+@media (hover:hover) {
+  .btn-primary:not([disabled]):hover { box-shadow:0 6px 18px rgba(227,184,90,.35); }
+  .btn-primary:not([disabled]):hover::after { animation:m-sheen calc(700ms * var(--m,1)) var(--e-out,ease-out); }
+}
+/* กำลังทำงาน: วงหมุน 14px หน้าข้อความ · JS ล็อกความกว้างเดิมไว้ (style.width) ปุ่มจึงไม่ขยับ · หยุดภาพเคลื่อนไหว = วงนิ่ง + "…" */
+.btn.btn-busy { cursor:progress; overflow:hidden; }
+.btn.btn-busy[disabled] { opacity:.85; cursor:progress; }
+.btn-busy::before { content:""; width:14px; height:14px; flex:none; box-sizing:border-box; border-radius:50%;
+  border:2px solid currentColor; border-right-color:transparent; animation:m-spin .8s linear infinite; }
+.btn-busy::after, .btn-primary.btn-busy::after { content:"…"; position:static; inset:auto; transform:none; background:none; animation:none; margin-left:-6px; }
+/* เสร็จ: เช็ก (SVG mask) เด้งขึ้น 1.2 วิ แล้ว JS คืนข้อความเดิม */
+.btn.btn-done { overflow:hidden; }
+.btn-done::before { content:""; width:14px; height:14px; flex:none; background:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z'/%3E%3C/svg%3E") center/contain no-repeat;
+  animation:m-pop var(--d-3,320ms) var(--spring-pop,ease-out) both; }
+.btn:not(.btn-primary).btn-done { border-color:var(--blue); color:var(--blue); }
 .btn-ink { background:var(--ink); border-color:var(--ink); color:var(--bg); }
 .btn-danger { color:var(--danger); }
 .btn-sm { padding:5px 12px; font-size:.88rem; }
@@ -118,3 +141,37 @@ button, input, select, textarea { font:inherit; color:inherit; }
 @media (max-width:560px) { .toast { right:16px; left:16px; max-width:none; } }
 .toast .btn { margin-left:8px; background:var(--bg); color:var(--ink); }
 .tt-swal .swal2-input::placeholder { color:var(--muted); opacity:.7; }
+
+/* ---------- แอนิเมชันกล่อง (DELIGHT §3.4) · ตัวคูณเวลา --m จาก motion.css (0 = ลดภาพเคลื่อนไหว → จบทันที) · keyframes m-* อยู่ motion.css ---------- */
+@keyframes tt-toast-in { from { opacity:0; transform:translateY(14px) scale(.98); } }
+@keyframes tt-toast-out { to { opacity:0; transform:translateY(8px); } }
+@keyframes tt-modal-in { from { opacity:0; transform:scale(.96) translateY(6px); } }
+@keyframes tt-modal-out { to { opacity:0; transform:scale(.97) translateY(4px); } }
+@keyframes tt-fade { from { opacity:0; } }
+.swal2-container .swal2-popup.swal2-toast.tt-toast-in { animation:tt-toast-in var(--d-3,320ms) var(--spring-soft,ease-out) both; }
+.swal2-container .swal2-popup.swal2-toast.tt-toast-out { animation:tt-toast-out var(--d-2,200ms) var(--e-in,ease-in) forwards; }
+.swal2-container .swal2-popup.tt-modal-in { animation:tt-modal-in var(--d-3,320ms) var(--e-out,ease-out) both; }
+.swal2-container .swal2-popup.tt-modal-out { animation:tt-modal-out var(--d-2,200ms) var(--e-in,ease-in) forwards; }
+.swal2-toast .swal2-icon.swal2-success.swal2-icon-show { animation:m-pop var(--d-3,320ms) var(--spring-pop,ease-out) both; }
+.swal2-popup.swal2-toast.tt-action .swal2-timer-progress-bar { background:#C8962E; height:3px; }
+/* <dialog> (ตัวช่วย · วางรายชื่อ · หลักสูตร · ตัวสำรองของ notify) */
+dialog[open] { animation:tt-modal-in var(--d-3,320ms) var(--e-out,ease-out); }
+dialog[open]::backdrop { animation:tt-fade var(--d-2,200ms) linear; }
+/* สลับแท็บในแอป: View Transitions (เบราว์เซอร์ที่รองรับ) — สั้น ไม่บังการคลิก */
+.app > main { view-transition-name:tt-main; }
+::view-transition-old(tt-main) { animation-duration:120ms; }
+::view-transition-new(tt-main) { animation-duration:200ms; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration:120ms; }
+.tab.tab-in { animation:m-in var(--d-2,200ms) var(--e-out,ease-out) both; }
+/* ตัวเลขนับขึ้น ไม่ให้ความกว้างแกว่ง */
+[data-count], .num-up { font-variant-numeric:tabular-nums; }
+/* ไอคอนไฟล์ที่บินลงมุมล่างขวาหลังดาวน์โหลด (motion.flyTo) */
+.fly-file { display:grid; place-items:center; width:40px; height:48px; border-radius:6px; background:var(--surface); border:1px solid var(--gold-bg); color:var(--gold); box-shadow:var(--shadow); font:600 .66rem/1 var(--mono); }
+.fly-file svg { width:20px; height:20px; }
+.fly-dock { position:fixed; right:18px; bottom:18px; width:28px; height:34px; pointer-events:none; visibility:hidden; }
+.fly-chip { display:inline-flex; align-items:center; gap:6px; padding:3px 10px 3px 3px; border-radius:999px; background:var(--surface); border:1px solid var(--gold-bg); color:var(--ink); font-size:.82rem; font-weight:600; white-space:nowrap; box-shadow:var(--shadow); }
+.fly-chip img { width:20px; height:20px; border-radius:50%; background:var(--gold-soft); }
+@media (prefers-reduced-motion:reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation:none !important; } }
+/* SweetAlert2 วาดไอคอนสำเร็จด้วย keyframes ของตัวเอง (swal2-rotate-success-circular-line 4.25s) → ตัดใต้ลดการเคลื่อนไหว/หยุดภาพ */
+@media (prefers-reduced-motion:reduce) { .swal2-icon, .swal2-icon * { animation:none !important; } }
+html.tt-still .swal2-icon, html.tt-still .swal2-icon * { animation:none !important; }

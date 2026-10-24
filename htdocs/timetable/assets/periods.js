@@ -2,6 +2,7 @@
 import { store, DAY_NAMES, esc } from './store.js';
 import { gridModel, retimePeriods, periodMinutes } from './rules.js';
 import * as notify from './notify.js';
+import * as motion from './motion.js';
 
 let lockClass = '';       // '' = ทุกห้อง
 let lockLabel = 'กิจกรรม';
@@ -12,8 +13,30 @@ export function setActions(a) { actions = a; }
 /** เลือกห้องในตัวเลือกคาบล็อก (จาก tt:goto { tab: 'periods', classId }) */
 export function setLockClass(id) { lockClass = typeof id === 'string' ? id : ''; }
 
+// ---------- แอนิเมชันหลังวาดใหม่ (DELIGHT §3.17) ----------
+// ตัวจัดการตั้ง fx ก่อน commit → render (อาจถูกเรียก 2 รอบในงานเดียว: onChange + render(root)) → เล่นหลังรอบสุดท้ายใน microtask
+let fx = null;
+function playFx() {
+  const f = fx; fx = null;
+  if (!f || !root?.isConnected) return;
+  if (f.flash) f.flash.forEach(([i, k], n) => {
+    const inp = root.querySelector(`[data-p="${i}"][data-f="${k}"]`);
+    if (!inp) return;
+    inp.style.animationDelay = `calc(${n * 40}ms * var(--m, 1))`;
+    motion.once(inp, 'm-flash').then(() => { inp.style.animationDelay = ''; });
+  });
+  if (f.row != null) motion.once(root.querySelector(`[data-p="${f.row}"][data-f="label"]`)?.closest('tr'), 'm-in-l');
+  if (f.lock) motion.once(root.querySelector(`td[data-ld="${f.lock[0]}"][data-lp="${f.lock[1]}"]`), 'm-pop');
+}
+/** แถวคาบจางออกก่อนลบจริง (ลดภาพเคลื่อนไหว = ลบทันที) */
+function fadeOut(el) {
+  if (!el || motion.still()) return Promise.resolve();
+  return Promise.resolve(motion.play(el, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(-10px)' }], { duration: 200, easing: motion.EASE.in, fill: 'forwards' }).finished).catch(() => {});
+}
+
 export function render(el) {
   root = el;
+  if (fx) queueMicrotask(playFx);
   const d = store.doc, t = d.term;
   if (lockClass && !d.classes.some((c) => c.id === lockClass)) lockClass = ''; // ห้องถูกลบ/สลับภาคเรียน
   el.innerHTML = `<div class="two-col">
@@ -85,6 +108,8 @@ export function render(el) {
     const i = +b.dataset.rm;
     const n = d.placements.filter((p) => p.period === i).length;
     if (n && !(await notify.confirm({ title: 'ลบคาบนี้?', icon: 'warning', ok: 'ลบคาบ', text: `คาบ “${t.periods[i]?.label || ''}” มีวิชาจัดอยู่ ${n} คาบ ลบแล้วจะถูกนำออกจากตาราง` }))) return;
+    await fadeOut(b.closest('tr'));
+    if (store.doc !== d) return;
     t.periods.splice(i, 1);
     shift(i, -1);
     store.commit('term'); render(root);
@@ -94,6 +119,7 @@ export function render(el) {
     const prev = t.periods[i];
     t.periods.splice(i + 1, 0, { label: String(t.periods.filter((p) => p.type !== 'break').length + 1), start: prev?.end || '', end: '', type: 'class' });
     shift(i + 1, +1);
+    fx = { row: i + 1 };
     store.commit('term'); render(root);
   }));
   el.querySelectorAll('[data-up]').forEach((b) => b.addEventListener('click', () => {
@@ -120,6 +146,7 @@ export function render(el) {
       const hit = d.placements.filter((p) => p.day === day && p.period === period && (!cls || store.doc.assignments.find((a) => a.id === p.assignmentId)?.classId === cls));
       if (hit.length) notify.warn(`มี ${hit.length} คาบวางทับช่องนี้อยู่ ย้ายออกได้ที่แท็บจัดตาราง`);
     }
+    fx = { lock: [day, period] };
     store.commit('lock'); render(root);
   }));
 
@@ -151,6 +178,8 @@ async function retime() {
   const next = retimePeriods(t.periods, res);
   if (next.every((p, i) => p.start === old[i].start && p.end === old[i].end)) { notify.info('เวลาเรียงต่อกันอยู่แล้ว ไม่มีอะไรเปลี่ยน'); return; }
   t.periods.splice(0, t.periods.length, ...next);
+  // ช่องเวลาที่เปลี่ยนพื้นทองจางไล่จากบนลงล่าง
+  fx = { flash: next.flatMap((p, i) => ['start', 'end'].filter((k) => p[k] !== old[i][k]).map((k) => [i, k])) };
   store.commit('term');
   notify.action(`คำนวณเวลาใหม่แล้ว: ${next[0].start}–${next[next.length - 1].end}`, 'เลิกทำ', () => {
     if (store.doc !== d) return;

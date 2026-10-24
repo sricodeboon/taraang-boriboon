@@ -384,5 +384,43 @@ test('autoAssign: แถวที่อ้างครูที่ถูกล�
   assert.equal(a.teacherId, 'sci');
 });
 
+// ── DELIGHT ก-5 (24 ต.ค. 69): แบ่งสอน perWeek < 2 = ไม่แบ่ง · ตัดคาบเกินโดยเก็บหมุดก่อน ──
+test('ก-5 แบ่งสอน perWeek 1 → null และเอกสารไม่เปลี่ยนเลย', () => {
+  const d = clone(legacy);
+  const a = d.assignments.find((x) => x.id === 'a2');
+  a.perWeek = 1;
+  const before = JSON.stringify(d);
+  assert.equal(splitAssignment(d, a, 'aZ'), null);
+  assert.equal(JSON.stringify(d), before);
+  a.perWeek = 0;
+  assert.equal(splitAssignment(d, a, 'aZ'), null);
+});
+
+test('ก-5 แบ่งสอน perWeek 2 → 1 + 1 · perWeek 5 → 3 + 2 (คาบรวมเท่าเดิม)', () => {
+  const d = clone(legacy);
+  const a2 = d.assignments.find((x) => x.id === 'a2');
+  const b2 = splitAssignment(d, a2, 'aY');
+  assert.deepEqual([a2.perWeek, b2.perWeek], [1, 1]);
+  const a4 = d.assignments.find((x) => x.id === 'a4');
+  const b4 = splitAssignment(d, a4, 'aW');
+  assert.deepEqual([a4.perWeek, b4.perWeek], [3, 2]);
+});
+
+test('ก-5 แบ่งสอน 5 คาบที่วางครบ (หมุด 2 คาบอยู่ท้าย) → 3 + 2 หมุดยังอยู่ครบ', () => {
+  const d = clone(legacy);
+  const a4 = d.assignments.find((x) => x.id === 'a4');
+  d.placements = d.placements.filter((p) => p.assignmentId !== 'a4');
+  d.placements.push(
+    { assignmentId: 'a4', day: 0, period: 0 }, { assignmentId: 'a4', day: 1, period: 0 }, { assignmentId: 'a4', day: 2, period: 0 },
+    { assignmentId: 'a4', day: 3, period: 3, pinned: true }, { assignmentId: 'a4', day: 4, period: 3, pinned: true },
+  );
+  const b = splitAssignment(d, a4, 'aV');
+  assert.deepEqual([a4.perWeek, b.perWeek], [3, 2]);
+  const left = d.placements.filter((p) => p.assignmentId === 'a4');
+  assert.equal(left.length, 3);
+  assert.equal(left.filter((p) => p.pinned).length, 2, 'หมุด 2 คาบต้องไม่หาย');
+  assert.deepEqual(left.map((p) => p.day), [0, 3, 4], 'คงลำดับเดิมในอาร์เรย์');
+});
+
 console.log(`\nผ่าน ${passed} / ${passed + failed}`);
 if (failed) process.exit(1);

@@ -46,17 +46,21 @@ terms(id, school_id, name, data_json, version, updated_at, updated_by)
 { "term":{"name","days","periods":[{label,start,end,type:'class'|'break'}]},
   "classes":[{id,name,level}], "teachers":[{id,name,short,maxPerDay,unavailable:[[d,p]]}],
   "rooms":[{id,name,kind}], "subjects":[{id,code,name,color}],
-  "assignments":[{id,subjectId,classId,teacherId,roomId,perWeek,doubles}],
+  "assignments":[{id,subjectId,classId,teacherId,roomId,perWeek,doubles}],   // perWeek 0–60 (store.sanitize ตัดที่ 60) · doubles ≤ floor(perWeek/2)
   "locks":[{classId|null,day,period,label}],
   "placements":[{assignmentId,day,period,pinned}] }
 ```
 บันทึกทั้งก้อนพร้อม `version` (optimistic lock: ถ้า version ไม่ตรง = มีคนแก้ก่อน → แจ้งผู้ใช้)
+- **store.sanitize** (แก้ในอาร์เรย์เดิมเสมอ): `assignment.perWeek` = 0–60 · `doubles` ≤ floor(perWeek/2) · `placements[].pinned` เป็นจริง/เท็จเมื่อมีค่า ('yes'/1 → true · 0/'0'/'false'/'no' → false) · placement/lock ที่วัน/คาบไม่ใช่จำนวนเต็ม ≥ 0 (NaN, 'abc', 1.5, −1) **ถูกตัดทิ้ง** (เดิมแปลงเป็น 0 = ย้ายไปจันทร์คาบแรก) · ค่าที่เกินช่วงวัน/คาบของตาราง **คงไว้** · เอกสารปกติ JSON เท่าเดิมหลัง sanitize
+- **merge3 (409/กู้ฉบับร่าง)**: รายการที่มี id เทียบรายรายการ · `placements` เทียบรายช่อง คีย์ `assignmentId|day|period` จัดกลุ่มตามการสอน · `locks` คีย์ `classId|day|period` (`classId` null → `*`) · แก้ฝั่งเดียว = เอาฝั่งนั้น · สองฝั่งวางคาบของการสอนต่างกันที่ไม่ชน = รวมทั้งคู่ ไม่ถาม · แก้คาบของการสอนเดียวกันทั้งสองฝั่งต่างกัน = ชน `'placements'` (prefer ตัดสินเฉพาะการสอนนั้น) · คาบที่เพิ่มคนละฝั่งชนห้อง/ครู/ห้องพิเศษช่องเดียวกัน = ชน (prefer ตัดสินเฉพาะคาบที่ชน) · `prefer === null` เก็บทั้งหมดไว้ให้ `mergeAsk` ถาม · ไม่มีฉบับฐาน/มีคีย์ซ้ำ = เทียบทั้งหมวดแบบเดิม · ท้ายสุดเรียก `trimPlacements`
+- **`trimPlacements(doc)`** (store.js, แก้ในอาร์เรย์เดิม คืนจำนวนที่ตัด): ตัดคาบกำพร้า (การสอนไม่มีแล้ว) + คาบเกิน `perWeek` ต่อการสอน — เก็บคาบปักหมุดก่อน แล้วตามลำดับในอาร์เรย์
+- **`rules.splitAssignment`**: perWeek < 2 → คืน `null` ไม่แก้เอกสาร (ผู้เรียกต้องเช็ก) · ตัดคาบเกินของแถวเดิมโดยเก็บคาบปักหมุดก่อน
 id ในเอกสารเป็นสตริงสั้นที่ client สร้าง (เช่น "c1", "t12")
 
 ## สัญญา Solver (JS, ES module + ใช้ใน Web Worker ได้)
 ```js
 import { solve } from './solver.js';
-const result = solve(input, { timeLimitMs: 4000, seed: 1 });
+const result = solve(input, { timeLimitMs: 4000, seed: 1, onProgress, onPhase, progressPlacements: true, weights });
 // input
 {
   days: 5,
@@ -64,7 +68,7 @@ const result = solve(input, { timeLimitMs: 4000, seed: 1 });
   classes:  [{ id }],
   teachers: [{ id, maxPerDay: 6, unavailable: [[day, period], ...] }],
   rooms:    [{ id }],
-  assignments: [{ id, subjectId, classId, teacherId, roomId: null, perWeek: 3, doubles: 1 }],  // subjectId: แถวแบ่งสอนวิชาเดียวกันนับ soft ร่วมกัน
+  assignments: [{ id, subjectId, classId, teacherId, roomId: null, perWeek: 3, doubles: 1, group: 'TH' }],  // subjectId: แถวแบ่งสอนวิชาเดียวกันนับ soft ร่วมกัน · group (optional) ดู Soft ใหม่
   locks:    [{ classId: null, day, period, label }],                                       // label: ใช้ในข้อความชน "วางทับคาบล็อก (ลูกเสือ)"
   fixed:    [{ assignmentId, day, period }]      // placements ที่ pinned — ห้ามย้าย
 }
@@ -72,9 +76,24 @@ const result = solve(input, { timeLimitMs: 4000, seed: 1 });
 {
   placements: [{ assignmentId, day, period }],   // รวม fixed
   unplaced:   [{ assignmentId, remaining, reason, code, params }],   // reason = ข้อความไทยเดิม · code/params = ดูตารางรหัสด้านล่าง
-  stats: { hardViolations: 0, softScore, ms, iterations }
+  stats: { hardViolations: 0, softScore, ms, iterations, timedOut, units, unplacedPeriods,
+           soft: { sameDay, adjacentDays, adjacentDaysRaw, teacherGaps, morningCore, classGaps } }
 }
 ```
+- **เพดาน**: `perWeek > 60` ต่อแถว → ไม่สร้างหน่วย คืน `BAD_DATA what:'perWeek'` (คาบที่ปักหมุดของแถวนั้นยังอยู่และกันช่อง) · หน่วยรวมเกิน 20,000 → แถวตั้งแต่ตัวที่ทำให้เกินได้ `BAD_DATA what:'units'` · ภาระเกินมากยังคืนภายใน ≈ timeLimit (ถอดชนแบบ heap ดูเวลา deadline+500 ms · ใส่กลับดูเวลา deadline+1500 ms) · ข้อมูลปกติได้ผลเท่าเดิมทุกคาบ
+- **adjacentDays** = จำนวนคู่ "วิชาเดียวกันลงวันติดกัน" ที่ **เกินขั้นต่ำที่เลี่ยงไม่ได้** (ต่อกลุ่มวิชา×ห้อง: k ครั้ง (คาบคู่นับ 1) ใน D วัน ต้องติดกันอย่างน้อย max(0, min(D−1, 2k−D−1))) → 0 = ดีที่สุดแล้ว · `adjacentDaysRaw` = จำนวนจริงทั้งหมด (ค่าเดิม) · `softScore` ยังคิดจากค่า raw ตามน้ำหนักเดิม (search ไม่เปลี่ยน)
+
+**ความคืบหน้า (onProgress / worker `progress`)** — ฟิลด์เดิมคงทุกตัว ฟิลด์ใหม่ optional (ผู้รับต้องทำงานได้เมื่อไม่มี)
+```js
+{ type:'progress', pct, phase, iterations, ms, best:{hardViolations, softScore},
+  pctMono,          // pct ที่ไม่ถอยหลัง (ใช้แทน pct ในแถบความคืบหน้า) — สุดท้าย = 1
+  placed, total,    // คาบที่วางได้โดยไม่ชนตอนนี้ / คาบทั้งหมดที่ต้องวาง (ไม่รวมแถว BAD_DATA) — สุดท้าย placed = result.placements.length
+  placements?,      // [{assignmentId, day, period}] snapshot คาบที่วางได้ไม่ชน (รวมหมุด) — ส่งเมื่อ phase เปลี่ยน หรือห่าง ≥ 400 ms · ≤ 2,000 รายการ
+  delta? }          // เกิน 2,000: {add:[[assignmentId,day,period]], remove:[...]} เทียบ snapshot ก่อนหน้า (ครั้งแรก = add ทั้งหมด)
+{ type:'phase', phase:'greedy'|'hard'|'repair'|'soft', ms }   // ข้อความใหม่ของ worker: ยิงทันทีเมื่อเปลี่ยน (ไม่ throttle) · solve() เรียก options.onPhase
+```
+- snapshot อ่านสถานะอย่างเดียว ไม่แตะ RNG → มี/ไม่มี onProgress ผลเท่ากันทุกคาบ · ปิดด้วย `options.progressPlacements:false` (worker ส่งต่อจาก `{type:'solve', options}`) · 42 ห้อง snapshot ≤ 60 KB
+- phase อาจวน `greedy → hard` ซ้ำเมื่อ restart · `repair` = กำลังถอดคาบที่ชนออก (จะมีคาบค้าง) · progress สุดท้าย (pct 1) ไม่แนบ snapshot — ใช้ `done.result.placements`
 ```js
 import { capacityCheck } from './solver.js';
 capacityCheck(input)   // → { issues: [{ code, params, text }] } ตรวจความจุเร็วโดยไม่จัดจริง (ตัวเลข/ข้อความชุดเดียวกับ solve)
@@ -91,7 +110,8 @@ capacityCheck(input)   // → { issues: [{ code, params, text }] } ตรวจ�
 | `BLOCKED_CLASS` | classId | ห้องถูกล็อกจนไม่มีคาบเรียน | ไปแท็บคาบล็อก |
 | `BLOCKED_ROOM` | roomId | (สงวนไว้ ยังไม่มีที่ส่ง) | ไปแท็บห้องพิเศษ |
 | `NO_TEACHER` | assignmentId (capacityCheck) | การสอนยังไม่มีครู (board กรองออกก่อนจัด นับใน readiness) | ไปเติมครู → tt:goto {tab:'data', section:'assignments', filter:'noTeacher'} |
-| `BAD_DATA` | what ('class'\|'teacher'), assignmentId, classId/teacherId | อ้างห้อง/ครูที่ไม่พบ | ไปแท็บการสอน |
+| `BAD_DATA` | what ('class'\|'teacher'\|'perWeek'\|'units'), assignmentId, classId/teacherId | อ้างห้อง/ครูที่ไม่พบ · perWeek เกิน 60 (ข้อความ “คาบ/สัปดาห์เกิน 60 (ข้อมูลผิดปกติ)”) · หน่วยรวมทั้งโรงเรียนเกิน 20,000 | ไปแท็บการสอน |
+| `PINNED_CLASH` | — (ไม่อยู่ใน unplaced) | จัดครบแต่ `stats.hardViolations > 0` จากคาบที่ปักหมุดชนกันเอง — board.js (แพ็กเกจ ข) ใส่ใน `meta.lastSolve.codes` | ดูจุดชน · เลิกปักหมุดที่ชน |
 | `CROWDED_TEACHER` / `CROWDED_ROOM` / `CROWDED_CLASS` / `CROWDED_MAX_DAY` | teacherId/roomId/classId (+maxPerDay) | ความจุพอแต่ค้นไม่เจอช่อง (ไม่ใช่พิสูจน์ว่าเป็นไปไม่ได้) | จัดใหม่/เลิกปักหมุด · CROWDED_MAX_DAY ลองเพิ่มเพดาน +1 |
 
 ปุ่ม “แก้ให้เลย” ทุกปุ่ม: แก้เอกสาร → `store.commit('fix')` ครั้งเดียว → toast “เลิกทำ” 10 วินาที · ผลเก่าที่ไม่มี code ใช้ regex ตามข้อความเดิม (fixFor)
@@ -100,6 +120,19 @@ capacityCheck(input)   // → { issues: [{ code, params, text }] } ตรวจ�
 
 **Hard:** ห้องเรียน/ครู/ห้องพิเศษ ไม่ซ้อนคาบ · ห้ามลงช่องพัก/คาบล็อก/คาบที่ครูไม่ว่าง · ครูไม่เกิน maxPerDay · คู่คาบต้องติดกันในวันเดียวกันไม่คร่อมช่องพัก
 **Soft:** วิชาเดียวกันในห้องเดียววันละไม่เกิน 1 ครั้ง (คู่คาบนับเป็น 1) · กระจายวิชาให้ทั่วสัปดาห์ · ลดคาบว่างแทรกของครู
+**Soft ใหม่ (ต.ค. 69)** — ใช้เมื่อมี `assignments[].group` อย่างน้อย 1 แถว หรือส่ง `options.weights` ระบุเอง · น้ำหนักใน `SOFT_WEIGHTS` ทับได้ด้วย `options.weights` (และ `score(input, placements, weights)`)
+
+| คีย์ | น้ำหนัก | ความหมาย |
+|---|---|---|
+| `sameDay` | 10 | วิชาเดียวกันวันเดียวกันเกิน 1 ครั้ง |
+| `adjacentDays` | 2 | วิชาเดียวกันวันติดกัน (search ใช้ค่า raw) |
+| `teacherGap` | 1 | คาบว่างแทรกของครู |
+| `morningCore` | 3 | วิชาหลัก (`group` ∈ TH MA SC FL) ลงคาบหลังพักแรก (ไม่มีพัก = ครึ่งหลังของวัน) ต่อคาบ · คาบเรียนสุดท้ายของวันนับ 2 |
+| `classGap` | 4 | ห้องเรียนมีคาบว่างกลางวัน (ระหว่างคาบเรียนแรก–สุดท้าย ไม่นับพัก · คาบล็อกนับว่าไม่ว่าง) ต่อคาบ |
+
+- ไม่ส่ง `group` เลย = `morningCore`/`classGap` เป็น 0 → ผลเท่ารุ่นก่อน 100% (ล็อกด้วย hash ใน solver.test ก-0) · `stats.soft.morningCore`/`classGaps` นับเสมอเพื่อแสดงผล แต่รวมใน softScore เฉพาะเมื่อเปิดใช้
+- ผลวัด (ประถม 6 ห้อง seed 1/7): ไทย+คณิตตกบ่าย 42–52% → 3–10% · คาบว่างกลางวันของห้อง → 0 · hard 0 · เวลา 27–36 → 46–84 ms (search ขัดเกลานานขึ้นเพราะยังเจอทางดีขึ้น)
+- ข้อควรรู้: มัธยม 42 ห้องที่ห้องไม่เต็ม (เรียน 22/40 คาบ) เมื่อส่ง group: classGaps 246→10 แต่ teacherGaps 29→88 และ adjacentDays 15→105 (classGap บีบคาบของห้องให้ติดกัน) — ถ้าจะส่ง group ให้มัธยม ควรลด `classGap` ผ่าน `options.weights`
 
 ## ข้อมูลภูมิศาสตร์/โรงเรียน (ทีม Data)
 - `data/geo.json`: `{"v":1,"source":"...","provinces":[{"n":"นครพนม","a":[{"n":"นาทม","t":["นาทม","หนองซน","ดอนเตย"]}]}]}`

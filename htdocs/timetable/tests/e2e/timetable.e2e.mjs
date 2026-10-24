@@ -60,6 +60,8 @@ async function check(page, label) {
 const shot = (page, name, opts = {}) => page.screenshot({ path: join(OUT, name + '.png'), ...opts });
 
 async function guest(page, kind = 'sample') {
+  // เพดานโหมดทดลอง 10 ครั้ง/ชม./IP (guest.php) — ทั้งไฟล์ล็อกอินทดลองเกิน 10 ครั้ง → ล้างเฉพาะถังโหมดทดลองของ DB ทดสอบก่อนทุกครั้ง
+  if (DB && /scratchpad|tmp/.test(DB)) try { execFileSync('sqlite3', [DB, "DELETE FROM rate_hits WHERE bucket LIKE 'guest:%' OR bucket LIKE 'gk:%'"]); } catch { /* ยังไม่มีตาราง */ }
   await page.goto(BASE);
   await page.click(`form[action="auth/guest.php"] button[value="${kind}"]`);
   await page.waitForURL(/app\.php/);
@@ -79,20 +81,25 @@ async function forceSave(page) {
   await page.evaluate(() => document.querySelector('#save-state').click());
   await page.waitForFunction(() => /บันทึกแล้ว/.test(document.querySelector('#save-state').textContent), null, { timeout: 15000 });
 }
-/** รอผลจัดอัตโนมัติ: จัดครบ = toast · วางไม่ครบ = กล่องสรุป (modal) → กด "ปิด" · คืนข้อความที่เห็น */
+/** รอผลจัดอัตโนมัติ (รุ่น delight: ไม่มี modal สรุปแล้ว — บอกที่เดียวในกล่องรายงานเหนือตาราง + toast สั้น)
+ *  รอให้ฉากจัดจบ (#tab-board[data-solve] ไม่ใช่ "run") แล้ว: วางไม่ครบ = .callout มี "วางไม่ลง N คาบ|ยังขาด" · ครบ = toast "จัดเสร็จ|วางเพิ่ม" · คืนข้อความที่เห็น */
 async function solveDone(page, timeout = 60000) {
   const h = await page.waitForFunction(() => {
+    if (document.querySelector('#tab-board')?.dataset.solve === 'run') return false;
     const m = document.querySelector('.swal2-popup:not(.swal2-toast)');
-    if (m && /วางไม่ลง|ยังขาด/.test(m.textContent)) return 'modal:' + m.textContent;
+    if (m && /วางไม่ลง|ยังขาด/.test(m.textContent)) return 'modal:' + m.textContent; // ต้องไม่เกิดแล้ว (ตรวจด้านล่าง)
+    const c = document.querySelector('#tab-board .callout[data-report]');
+    if (c && /วางไม่ลง \d+ คาบ|ยังขาด/.test(c.textContent)) return 'callout:' + c.textContent.replace(/\s+/g, ' ');
     const t = [...document.querySelectorAll('.swal2-toast, #toast:not([hidden])')].find((e) => /จัดเสร็จ|วางเพิ่ม/.test(e.textContent));
     return t ? 'toast:' + t.textContent : false;
   }, null, { timeout });
   const txt = await h.jsonValue();
-  if (txt.startsWith('modal:')) {
-    await page.locator('.swal2-popup:not(.swal2-toast) button', { hasText: /^ปิด$/ }).click();
-    await page.waitForSelector('.swal2-popup:not(.swal2-toast)', { state: 'detached' });
-  }
+  assert.ok(!txt.startsWith('modal:'), 'ผลจัดต้องไม่เปิดกล่อง modal ซ้ำกับรายงาน: ' + txt.slice(0, 80));
   return txt;
+}
+/** มือถือ: ปุ่ม "ล้างที่ไม่ปักหมุด"/แนวตาราง อยู่ในเมนู ⋯ ของแถบเครื่องมือ → กางก่อนกด */
+async function tbMore(page) {
+  if (await page.locator('#tab-board .tb-more:not([open]) > summary').count()) await page.click('#tab-board .tb-more > summary');
 }
 async function gotoTab(page, t) { await page.click(`.tabs [data-tab="${t}"]`); await page.waitForTimeout(150); }
 async function dataSection(page, k) { await gotoTab(page, 'data'); await page.click(`[data-sec="${k}"]`); await page.waitForTimeout(150); }
@@ -403,10 +410,11 @@ await test('มือถือ 390px: ไม่ล้นจอทุกแท็
   await gotoTab(m.page, 'export'); await over('export');
   await shot(m.page, '14-mobile-export');
   await gotoTab(m.page, 'board');
-  await m.page.click('[data-orient="periods"]'); await over('board periods');
+  // รุ่น delight: มือถือย้ายแนวตาราง/ล้างที่ไม่ปักหมุดเข้าเมนู ⋯ ของแถบเครื่องมือ (แถบเครื่องมือเหลือ 2 แถว) → กางเมนูก่อนกด
+  await tbMore(m.page); await m.page.click('[data-orient="periods"]'); await over('board periods');
   // ลากด้วยนิ้ว (pointer) ในแนววันเรียงลงล่างบนมือถือ
-  await m.page.click('[data-orient="days"]');
-  await m.page.click('#clear-auto');
+  await tbMore(m.page); await m.page.click('[data-orient="days"]');
+  await tbMore(m.page); await m.page.click('#clear-auto');
   await m.page.waitForTimeout(400);
   const before = (await store(m.page)).placements.length;
   const chip = m.page.locator('.chip[data-asg]:not(.done)').first();
@@ -521,6 +529,124 @@ await test('ลองใช้ทันที · ประถม: ได้ข�
   await assertStyle(P, 'app board (ประถม)');
 });
 
+await test('ฉากจัดอัตโนมัติ (ประถม): แถบความคืบหน้าโผล่ · คาบแรกลง ≤1.3 วิ · ครบ ≤2.4 วิ · ไม่มี long task > 50ms ระหว่างเผย · ฉลองแล้วไม่มีของค้าง', async () => {
+  await gotoTab(P, 'board');
+  const t = await P.evaluate(() => new Promise((res) => {
+    const lt = [];
+    try { new PerformanceObserver((l) => { for (const e of l.getEntries()) lt.push([e.startTime, e.duration]); }).observe({ type: 'longtask' }); } catch { /* ไม่รองรับ */ }
+    const s = performance.now();
+    let first = 0, all = 0, sawBar = false;
+    document.querySelector('#auto-solve').click(); // คลิกในหน้าเอง เวลาเริ่มนับตรงกับคลิกจริง
+    const tick = () => {
+      const now = performance.now() - s;
+      const bar = document.querySelector('#solve-progress');
+      if (bar && !bar.hidden) sawBar = true;
+      const cells = [...document.querySelectorAll('#tab-board .tt .cell')];
+      const out = cells.filter((c) => !c.classList.contains('m-pre')); // ยังซ่อนรอจังหวะเผย = m-pre
+      if (!first && out.length) first = now;
+      if (first && !all && cells.length && cells.every((c) => !c.classList.contains('m-pre') && +getComputedStyle(c).opacity > 0.02)) all = now;
+      if ((all && document.querySelector('#tab-board').dataset.solve === 'done') || now > 10000) {
+        res({ first, all, sawBar, n: cells.length, long: lt.filter(([st, d]) => st >= s + first - 5 && st <= s + all + 5 && d > 50).map(([, d]) => Math.round(d)) });
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }));
+  assert.ok(t.sawBar, '#solve-progress ต้องเคยแสดง');
+  assert.ok(t.n > 0, 'มีคาบในตาราง');
+  assert.ok(t.first > 0 && t.first <= 1300, `คาบแรกลงที่ ${Math.round(t.first)} ms`);
+  assert.ok(t.all > 0 && t.all <= 2400, `คาบครบที่ ${Math.round(t.all)} ms`);
+  assert.deepEqual(t.long, [], 'long task ระหว่างเผย');
+  // ฉลอง: ครูบูรณ์ท่า celebrate + คอนเฟตติ 4 สี (ไม่มีเขียว) · หายหมดใน 2.5 วิ นับจากเห็นชิ้นแรก
+  const cf = await P.evaluate(() => new Promise((res) => {
+    const s = performance.now();
+    let colors = null, seen = 0;
+    const tick = () => {
+      const now = performance.now() - s;
+      const ps = [...document.querySelectorAll('.m-confetti i')];
+      if (ps.length && !colors) { seen = now; colors = [...new Set(ps.map((p) => getComputedStyle(p).backgroundColor))]; }
+      if ((colors && !document.querySelector('.m-confetti')) || now > 6000) {
+        res({ colors, life: colors ? Math.round(now - seen) : -1, pose: document.querySelector('.boon-fig img.on, .boon img.on, .boon-card img')?.getAttribute('src') || '' });
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }));
+  assert.ok(cf.colors, 'ต้องมีคอนเฟตติเมื่อจัดครบ');
+  assert.equal(cf.colors.length, 4, 'คอนเฟตติ 4 สี: ' + cf.colors.join(' '));
+  for (const c of cf.colors) {
+    const [r, g, b] = c.match(/\d+/g).map(Number);
+    assert.ok(!(g > r + 20 && g > b + 20), 'คอนเฟตติห้ามเขียว ' + c);
+  }
+  assert.ok(cf.life >= 0 && cf.life <= 2500, `คอนเฟตติหายใน ${cf.life} ms`);
+  assert.match(cf.pose, /celebrate/, 'ครูบูรณ์ท่าฉลอง: ' + cf.pose);
+  await toastText(P, /จัดเสร็จ \d+ คาบ ไม่มีคาบชน · ครูทุกคนไม่สอนเกินเพดาน/);
+  const rep = await P.locator('#tab-board .callout[data-report]').textContent();
+  assert.doesNotMatch(rep, /ใช้เวลา/, 'ไม่บอกเวลาที่ใช้แล้ว');
+  assert.match(rep, /ไม่มีคาบชน · ครูทุกคนไม่สอนเกินเพดาน/);
+  await P.waitForFunction(() => document.querySelector('.boon-card')?.dataset.tone === 'ok' && /จัดครบทุกคาบ \d+ คาบ/.test(document.querySelector('.boon-msg')?.textContent || ''));
+  assert.equal(await P.locator('[data-next-hint]').count() >= 1, true, 'ชี้ปุ่มส่งออก');
+  // ภาพรวมทั้งโรงเรียน: แถว = ห้อง · ตัวเลขนับขึ้นจบที่ค่าจริง · วาด ≤ 16ms
+  const ov = await P.evaluate(() => ({
+    rows: document.querySelectorAll('.overview-map .ov-row').length,
+    rects: document.querySelectorAll('.overview-map .ov-col rect').length,
+    placed: document.querySelector('.overview-map .ov-nums b')?.textContent,
+    ms: Math.max(...performance.getEntriesByName('tt-overview').map((e) => e.duration)),
+  }));
+  const d = await store(P);
+  assert.equal(ov.rows, d.classes.length);
+  assert.ok(ov.rects >= d.classes.length * 25, 'ช่องในแผนที่ ' + ov.rects);
+  await P.waitForTimeout(800);
+  assert.equal(await P.locator('.overview-map .ov-nums b').first().textContent(), String(d.placements.length));
+  assert.ok(ov.ms <= 16, `วาดแผนที่ ${ov.ms.toFixed(1)} ms`);
+  // 36 ห้อง (สำเนา 6 เท่าในหน่วยความจำ ไม่ commit): วาดแผนที่ ≤ 16ms
+  const big = await P.evaluate(async () => {
+    const { store, index } = await import('./assets/store.js');
+    const board = await import('./assets/board.js');
+    const orig = store.doc;
+    const d = JSON.parse(JSON.stringify(orig));
+    const cls = [...d.classes], asg = [...d.assignments], pls = [...d.placements];
+    for (let k = 1; k < 6; k++) {
+      for (const c of cls) d.classes.push({ ...c, id: c.id + '_' + k, name: c.name + '/' + k });
+      for (const a of asg) d.assignments.push({ ...a, id: a.id + '_' + k, classId: a.classId + '_' + k });
+      for (const p of pls) d.placements.push({ ...p, assignmentId: p.assignmentId + '_' + k });
+    }
+    store.doc = d; index();
+    let ms = 0, rows = 0;
+    try {
+      for (let i = 0; i < 3; i++) { const t0 = performance.now(); const h = board.overviewHTML(); ms = i ? Math.min(ms, performance.now() - t0) : performance.now() - t0; rows = (h.match(/class="ov-row/g) || []).length; }
+    } finally { store.doc = orig; index(); }
+    return { ms, rows };
+  });
+  assert.equal(big.rows, 36);
+  assert.ok(big.ms <= 16, `แผนที่ 36 ห้อง ${big.ms.toFixed(1)} ms`);
+  // ไม่มีของค้าง: คอนเฟตติ/ghost/เงาความคืบหน้า
+  await P.waitForTimeout(2600);
+  assert.equal(await P.locator('.m-ghost, .boon-confetti i, .m-confetti, .m-ghost-cell, .ghost-wrap').count(), 0);
+  await assertStyle(P, 'board หลังจัด (ประถม)');
+  await shot(P, '19-solved-scene');
+});
+
+await test('summarize(): ครบ / ไม่ครบ / ครบแต่หมุดชน / จัดเฉพาะที่ขาด (ฟังก์ชันล้วน)', async () => {
+  const r = await P.evaluate(async () => {
+    const { summarize } = await import('./assets/board.js');
+    return [
+      summarize({ unplaced: [], n: 147 }),
+      summarize({ unplaced: [{ remaining: 12 }, { remaining: 8 }], n: 127 }),
+      summarize({ unplaced: [], hard: 2, n: 147 }),
+      summarize({ unplaced: [{ remaining: 3 }], mode: 'missing', added: 9, n: 140 }),
+      summarize({ unplaced: [], skipped: 2, n: 140 }),
+    ];
+  });
+  assert.equal(r[0].tone, 'ok'); assert.match(r[0].toast, /จัดเสร็จ 147 คาบ ไม่มีคาบชน · ครูทุกคนไม่สอนเกินเพดาน/);
+  assert.equal(r[1].tone, 'warn'); assert.equal(r[1].head, 'จัดได้ 127 คาบ · วางไม่ลง 20 คาบ'); assert.equal(r[1].toast, 'วางไม่ลง 20 คาบ — ดูวิธีแก้เหนือตาราง');
+  assert.equal(r[2].tone, 'warn'); assert.match(r[2].head, /จัดครบแต่มีคาบชน 2 จุด/); assert.match(r[2].toast, /ชน/); assert.doesNotMatch(r[2].toast + r[2].head, /ไม่มีคาบชน/);
+  assert.equal(r[3].head, 'วางเพิ่มได้ 9 คาบ · ยังขาด 3 คาบ');
+  assert.match(r[4].head, /ยังขาด/);
+});
+
 await test('ตัวช่วยเริ่มต้น 4 คำถาม: ภาคเรียนว่าง → เปิดเอง → ประถม 6 ชั้น + คละชั้น ป.1-2 → ได้ 5 ห้อง ลูกเสือรายห้อง การสอนร่างไม่มีครู', async () => {
   await P.selectOption('#term-select', '__new');
   await P.waitForSelector('.swal2-popup #nt-kind');
@@ -608,17 +734,27 @@ await test('จัด → ติด (ครูสอนได้วันละ 
   });
   await gotoTab(P, 'board');
   await P.click('#auto-solve');
-  // วางไม่ครบ → กล่องสรุป (modal) บอกสาเหตุหลัก + วิธีแก้ · ปิดแล้วใช้ปุ่มแก้ให้เลยในรายงานบนกระดาน
-  await P.waitForFunction(() => /วางไม่ลง \d+ คาบ/.test(document.querySelector('.swal2-popup:not(.swal2-toast)')?.textContent || ''), null, { timeout: 60000 });
-  assert.match(await P.locator('.swal2-popup').textContent(), /สูงสุด\/วัน/);
-  await P.locator('.swal2-popup:not(.swal2-toast) button', { hasText: /^ปิด$/ }).click();
-  await P.waitForSelector('.swal2-popup:not(.swal2-toast)', { state: 'detached' });
+  // รุ่น delight: วางไม่ครบบอกที่เดียว (ไม่มี modal) = กล่องรายงานเหนือตาราง + ครูบูรณ์ปลอบ 1 ประโยค + toast สั้น
+  await P.waitForFunction(() => /วางไม่ลง \d+ คาบ/.test(document.querySelector('#tab-board .callout[data-report]')?.textContent || ''), null, { timeout: 60000 });
+  await P.waitForFunction(() => document.querySelector('#tab-board')?.dataset.solve !== 'run', null, { timeout: 10000 });
+  assert.match(await P.locator('#tab-board .callout[data-report]').textContent(), /สูงสุด\/วัน/);
+  assert.equal(await P.locator('.swal2-popup:not(.swal2-toast)').count(), 0, 'ไม่มีกล่อง modal สรุปซ้ำ');
+  await toastText(P, /วางไม่ลง \d+ คาบ — ดูวิธีแก้เหนือตาราง/);
+  assert.match(await P.locator('.boon-msg').textContent(), /เหลืออีก \d+ คาบ/);
   const fix = P.locator('[data-fix]', { hasText: /เพิ่มเป็น/ }).first();
   await fix.waitFor({ timeout: 10000 });
   await shot(P, '23-stuck-fix');
   await assertStyle(P, 'board report');
   await fix.click();
   await toastText(P, /สูงสุด|เพิ่ม/);
+  // ปุ่มแก้รับรู้ผล: ปุ่มเป็น ✓ → การ์ดนั้นหายจากรายงาน · ครูบูรณ์ยืนยันว่าแก้แล้ว (ไม่ถอยไปพูดเรื่อง "ยังไม่มีครู")
+  await P.waitForSelector('#tab-board .btn-done', { timeout: 3000 });
+  const boon = await P.locator('.boon-msg').textContent();
+  assert.doesNotMatch(boon, /ยังมีการสอน .* ยังไม่มีครู/);
+  assert.match(boon, /จัดเฉพาะที่ยังขาด|แล้วครับ/);
+  await P.waitForFunction(() => !document.querySelector('#tab-board .btn-done'), null, { timeout: 4000 });
+  await P.waitForTimeout(300);
+  assert.match(await P.locator('.boon-msg').textContent(), /จัดเฉพาะที่ยังขาด|แล้วครับ/, 'ข้อความยืนยันค้างอยู่หลังการ์ดหาย');
   let d = await store(P);
   assert.ok(d.teachers.find((t) => t.id === tid).maxPerDay > 1, 'เพิ่ม maxPerDay แล้ว');
   beforeMissing = d.placements.map((p) => `${p.assignmentId}@${p.day}.${p.period}`).sort();
@@ -771,6 +907,290 @@ await test('แอป: เปิดหน้า CLS < 0.02 (แถบขั้�
   assert.ok(cls < 0.02, 'CLS = ' + cls.toFixed(4));
 });
 await sb.ctx.close();
+
+await test('หมุดชนกันเอง (2 คาบห้องเดียวกันช่องเดียวกัน) → จัดใหม่: รายงาน/toast มี "ชน" ไม่มี "ไม่มีคาบชน" · ป้ายชนตรงรายงาน · ครูบูรณ์ปลอบ · เลิกปักหมุดที่ชนแล้วจัดใหม่ = ไม่มีจุดชน', async () => {
+  const c = await open();
+  const p = c.page;
+  await guest(p);
+  await p.goto(BASE + 'app.php?dbg=1');
+  await p.waitForSelector('#tab-board .toolbar');
+  // ลากวาง 1 ครั้ง: "วางได้ไหม" คำนวณครั้งเดียวต่อช่องต่อการลาก (Map ตอนเริ่มลาก ไม่ใช่ทุก pointermove)
+  await drag(p, p.locator('.chip[data-asg]').first(), p.locator('.tt tbody tr').nth(1).locator('td[data-day]:not(.lock)').nth(1));
+  const dbg = await p.evaluate(() => window.__tt_dbg);
+  assert.ok(dbg && dbg.drags >= 1 && dbg.why === dbg.cells * dbg.drags, 'whyCannotPlace ต่อการลาก: ' + JSON.stringify(dbg));
+  assert.equal(await p.locator('.ghost-wrap').count(), 0, 'ghost ถูกลบหลังวาง');
+  const slot = await p.evaluate(async () => {
+    const { store } = await import('./assets/store.js');
+    const d = store.doc;
+    const cls = d.classes[0].id;
+    const mine = d.assignments.filter((a) => a.classId === cls && a.teacherId);
+    const [a1] = mine;
+    const a2 = mine.find((a) => a.teacherId !== a1.teacherId);
+    const P = d.term.periods.length;
+    let at = null;
+    for (let day = 0; day < d.term.days && !at; day++) for (let period = 0; period < P && !at; period++) {
+      if (d.term.periods[period].type === 'break') continue;
+      if (d.locks.some((l) => l.day === day && l.period === period && (l.classId == null || l.classId === cls))) continue;
+      at = { day, period };
+    }
+    d.placements = d.placements.filter((x) => !(x.day === at.day && x.period === at.period));
+    d.placements.push({ assignmentId: a1.id, ...at, pinned: true }, { assignmentId: a2.id, ...at, pinned: true });
+    store.commit('place');
+    return at;
+  });
+  assert.ok(slot);
+  await p.click('#auto-solve');
+  await p.waitForSelector('.cell-menu [data-mode="all"]');
+  await p.click('.cell-menu [data-mode="all"]');
+  const ok = p.locator('.swal2-popup:not(.swal2-toast) .swal2-confirm');
+  if (await ok.isVisible({ timeout: 2000 }).catch(() => false)) await ok.click();
+  await p.waitForFunction(() => document.querySelector('#tab-board')?.dataset.solve === 'done' && document.querySelector('#tab-board .callout[data-report]'), null, { timeout: 30000 });
+  await toastText(p, /ชน/);
+  const toast = await p.evaluate(() => [...document.querySelectorAll('.swal2-toast')].map((e) => e.textContent).join(' '));
+  assert.doesNotMatch(toast, /ไม่มีคาบชน/);
+  const rep = await p.locator('#tab-board .callout[data-report]').textContent();
+  assert.match(rep, /ชน (\d+) จุด/);
+  assert.doesNotMatch(rep, /ไม่มีคาบชน/);
+  const nRep = +rep.match(/ชน (\d+) จุด/)[1];
+  const pill = await p.locator('#pill-hard').textContent();
+  assert.equal(pill.trim(), `ชน ${nRep} จุด`, 'ป้ายชนต้องตรงรายงาน');
+  assert.equal(await p.locator('.boon-card').getAttribute('data-tone'), 'warn', 'ครูบูรณ์ปลอบ ไม่ฉลอง');
+  assert.ok((await store(p)).meta.lastSolve.codes.includes('PINNED_CLASH'));
+  await shot(p, '27-pinned-clash');
+  await p.click('#tab-board [data-clash="unpin"]');
+  await toastText(p, /เลิกปักหมุด \d+ คาบ/);
+  await p.click('.swal2-toast .swal2-confirm'); // "จัดใหม่ทั้งหมด"
+  await solveDone(p);
+  assert.match(await p.locator('#pill-hard').textContent(), /ไม่มีจุดชน/);
+  assert.deepEqual(await check(p, 'pinned clash'), []);
+  await c.ctx.close();
+});
+
+/** ทำให้จัดไม่ลง: ครูที่สอนมากสุด n คน สอนได้วันละ 1 คาบ */
+async function capTeachers(p, n = 1) {
+  await p.evaluate(async (n) => {
+    const { store } = await import('./assets/store.js');
+    const load = new Map();
+    for (const a of store.doc.assignments) if (a.teacherId) load.set(a.teacherId, (load.get(a.teacherId) || 0) + a.perWeek);
+    for (const [id] of [...load.entries()].sort((a, b) => b[1] - a[1]).slice(0, n)) store.doc.teachers.find((t) => t.id === id).maxPerDay = 1;
+    store.commit('data');
+  }, n);
+}
+/** กด #auto-solve ในหน้าเอง แล้ววัดทุกเฟรมระหว่าง data-solve='run': ตำแหน่ง .tt thead · มีรายงานผลใหม่โผล่ไหม · หัวรายงานเป็น 0 ไหม */
+const watchScene = (p) => p.evaluate(() => new Promise((res) => {
+  const box = document.querySelector('#tab-board');
+  const top0 = document.querySelector('#tab-board .tt thead').getBoundingClientRect().top;
+  const s = performance.now();
+  let maxDy = 0, frames = 0, report = 0, zero = 0, ran = false;
+  document.querySelector('#auto-solve').click();
+  const tick = () => {
+    const run = box.dataset.solve === 'run';
+    if (run) {
+      ran = true; frames++;
+      const th = document.querySelector('#tab-board .tt thead');
+      if (th) maxDy = Math.max(maxDy, Math.abs(th.getBoundingClientRect().top - top0));
+      if (document.querySelector('#tab-board .callout[data-report]')) report++;
+      if (/จัดครบทุกคาบแล้ว 0 คาบ/.test(box.textContent)) zero++;
+    }
+    if ((ran && !run) || performance.now() - s > 30000) { res({ maxDy, frames, report, zero, ran, ms: performance.now() - s }); return; }
+    requestAnimationFrame(tick);
+  };
+  tick();
+}));
+
+for (const cf of [{ w: 1366, h: 900 }, { w: 390, h: 844 }, { w: 1366, h: 900, reduce: true }]) await test(`ฉากจัด (${cf.w}px${cf.reduce ? ' ลดการเคลื่อนไหว' : ''}): ระหว่าง data-solve="run" ตาราง (.tt thead) ไม่ขยับเลย · รายงานผลใหม่ไม่โผล่ก่อนเผย · ไม่มี "0 คาบ" · จบฉากแล้วรายงานมา + ครูบูรณ์ยืนยันการแก้`, async () => {
+  const c = await open({ width: cf.w, height: cf.h });
+  const p = c.page;
+  if (cf.reduce) await p.emulateMedia({ reducedMotion: 'reduce' });
+  await guest(p, 'sample-primary');
+  await gotoTab(p, 'board');
+  // รอบ 1 (ยังไม่มีคาบ → กล่อง "ข้อมูลพร้อมแล้ว" อยู่เหนือตาราง) · รอบ 2 (จัดซ้ำทั้งหมด มีรายงาน+ภาพรวมเดิม)
+  const r1 = await watchScene(p);
+  assert.ok(r1.ran && r1.frames > 3, 'ต้องเห็นฉากจัด ' + JSON.stringify(r1));
+  assert.equal(r1.maxDy, 0, 'thead ขยับระหว่างฉาก (รอบแรก) ' + JSON.stringify(r1));
+  assert.equal(r1.report, 0, 'รายงานผลใหม่ต้องไม่โผล่ระหว่างฉาก');
+  assert.equal(r1.zero, 0, 'หัวรายงานต้องไม่เป็น 0 คาบ');
+  await p.waitForSelector('#tab-board .callout[data-report]', { timeout: 3000 });
+  await p.waitForTimeout(800);
+  assert.match(await p.locator('#tab-board .callout[data-report]').textContent(), /จัดครบทุกคาบแล้ว [1-9]\d* คาบ/);
+  await capTeachers(p, 1);
+  await p.click('#auto-solve');
+  await p.click('.cell-menu [data-mode="all"]');
+  // กล่องยืนยัน "จัดใหม่ทั้งหมด?" → กดยืนยันในหน้า แล้ววัดตั้งแต่จังหวะนั้น
+  await p.waitForSelector('.swal2-confirm');
+  const r2 = await p.evaluate(() => new Promise((res) => {
+    const box = document.querySelector('#tab-board');
+    const top0 = document.querySelector('#tab-board .tt thead').getBoundingClientRect().top;
+    const s = performance.now();
+    let maxDy = 0, frames = 0, report = 0, ran = false;
+    document.querySelector('.swal2-confirm').click();
+    const tick = () => {
+      const run = box.dataset.solve === 'run';
+      if (run) {
+        ran = true; frames++;
+        maxDy = Math.max(maxDy, Math.abs(document.querySelector('#tab-board .tt thead').getBoundingClientRect().top - top0));
+        if (document.querySelector('#tab-board .callout[data-report]')) report++;
+      }
+      if ((ran && !run) || performance.now() - s > 30000) { res({ maxDy, frames, report, ran }); return; }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }));
+  assert.ok(r2.ran, 'ต้องเห็นฉากจัดรอบ 2');
+  assert.equal(r2.maxDy, 0, 'thead ขยับระหว่างฉาก (จัดซ้ำ) ' + JSON.stringify(r2));
+  assert.equal(r2.report, 0, 'รายงานผลใหม่ต้องไม่โผล่ระหว่างฉาก (จัดซ้ำ)');
+  // จบฉาก: รายงาน "วางไม่ลง" มา → กดแก้ → ครูบูรณ์ยืนยัน ไม่ถูกข้อความปลอบตอนจบฉากทับ
+  await p.waitForFunction(() => /วางไม่ลง \d+ คาบ/.test(document.querySelector('#tab-board .callout[data-report]')?.textContent || ''), null, { timeout: 5000 });
+  assert.ok((await pageWidth(p)) <= cf.w, 'ไม่ล้นแนวนอน');
+  if (cf.w < 500) { assert.deepEqual(await check(p, 'scene no jump 390'), []); await c.ctx.close(); return; } // มือถือ: ปุ่มแก้อยู่ในข้อที่กาง ทดสอบแยกในชุดมือถือ
+  await p.locator('#tab-board .callout[data-report] [data-fix]', { hasText: /เพิ่มเป็น/ }).first().click();
+  await p.waitForTimeout(1500);
+  const msg = await p.locator('.boon-msg').textContent();
+  assert.match(msg, /แล้วครับ/, `ครูบูรณ์ต้องยืนยันการแก้: ${msg}`);
+  assert.doesNotMatch(msg, /ไม่ต้องห่วง/);
+  assert.ok(await p.locator('.boon-acts button', { hasText: 'จัดเฉพาะที่ยังขาด' }).count() >= 1);
+  assert.deepEqual(await check(p, 'scene no jump'), []);
+  await c.ctx.close();
+});
+
+for (const delay of [0, 300]) await test(`กด "แก้ให้เลย" แล้วกด "เลิกทำ" ภายใน ${delay} ms (ก่อนการ์ดจาง 0.9 วิ) → การ์ดสาเหตุกลับมาครบพร้อมปุ่มแก้ · ค่าเดิมคืน · สลับมุมมองแล้วยังอยู่`, async () => {
+  const c = await open();
+  const p = c.page;
+  await guest(p, 'sample-primary');
+  await capTeachers(p, 3);
+  await gotoTab(p, 'board');
+  await p.click('#auto-solve');
+  await p.waitForFunction(() => document.querySelector('#tab-board')?.dataset.solve === 'done' && document.querySelector('#tab-board .callout[data-report] .fix-card'), null, { timeout: 30000 });
+  await p.waitForTimeout(400);
+  const n0 = await p.locator('#tab-board .callout[data-report] .fix-card').count();
+  const caps0 = (await store(p)).teachers.map((t) => t.maxPerDay ?? null);
+  await p.locator('#tab-board .callout[data-report] [data-fix].btn-primary').first().click();
+  await p.waitForSelector('.swal2-toast .swal2-confirm', { timeout: 3000 });
+  if (delay) await p.waitForTimeout(delay);
+  await p.click('.swal2-toast .swal2-confirm'); // "เลิกทำ"
+  await p.waitForTimeout(1600);
+  const n1 = await p.locator('#tab-board .callout[data-report] .fix-card').count();
+  assert.equal(n1, n0, `การ์ด ${n0} → ${n1} หลังเลิกทำ`);
+  assert.equal(await p.locator('#tab-board .btn-done').count(), 0, 'ไม่มีปุ่ม ✓ ค้าง');
+  assert.deepEqual((await store(p)).teachers.map((t) => t.maxPerDay ?? null), caps0, 'ค่าเดิมคืนครบ');
+  assert.ok(await p.locator('#tab-board .callout[data-report] [data-fix]', { hasText: /เพิ่มเป็น/ }).count() >= 1, 'ปุ่ม "เพิ่มเป็น N" กลับมา');
+  assert.doesNotMatch(await p.locator('.boon-msg').textContent(), /^แก้แล้วครับ/, 'ครูบูรณ์ไม่ค้างข้อความแก้แล้ว');
+  await p.click('#tab-board [data-view="teacher"]');
+  await p.click('#tab-board [data-view="class"]');
+  assert.equal(await p.locator('#tab-board .callout[data-report] .fix-card').count(), n0, 'สลับมุมมองแล้วการ์ดยังครบ');
+  // แก้จริงอีกครั้ง (ไม่เลิกทำ) → การ์ดนั้นหาย 1 ใบ
+  await p.locator('#tab-board .callout[data-report] [data-fix].btn-primary').first().click();
+  await p.waitForTimeout(1800);
+  assert.equal(await p.locator('#tab-board .callout[data-report] .fix-card').count(), n0 - 1, 'แก้จริง → การ์ดหาย 1 ใบ');
+  assert.deepEqual(await check(p, 'undo fix race ' + delay), []);
+  await c.ctx.close();
+});
+
+await test('ลูกศรทองของครูบูรณ์ชี้ปุ่มจัดอัตโนมัติ → สลับแท็บแล้วลูกศรหาย (ไม่ค้างชี้ที่ว่างในแท็บอื่น)', async () => {
+  const c = await open();
+  const p = c.page;
+  await guest(p, 'sample');
+  await p.waitForSelector('.boon-arrow', { timeout: 4000 });
+  await gotoTab(p, 'export');
+  assert.equal(await p.locator('.boon-arrow').count(), 0, 'ลูกศรต้องหายเมื่อสลับแท็บ');
+  assert.deepEqual(await check(p, 'arrow tab switch'), []);
+  await c.ctx.close();
+});
+
+for (const mode of ['reduce', 'tt-still']) await test(`ลดการเคลื่อนไหว (${mode}): จัดแล้วตารางขึ้นทันที ข้อมูลครบ · ไม่มี animation ค้าง (รวมไอคอน Swal) · ไม่มีคอนเฟตติ · ปุ่มเป้ามีขอบทองค้าง`, async () => {
+  const ctx2 = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'th-TH', ...(mode === 'reduce' ? { reducedMotion: 'reduce' } : {}) });
+  // tt-still = ปุ่ม "หยุดภาพเคลื่อนไหว" ของหน้าแรก (localStorage) → layout.php ติด class ที่ <html> ก่อน paint ทุกหน้า
+  if (mode === 'tt-still') await ctx2.addInitScript(() => { try { localStorage.setItem('tt-still', '1'); } catch { /* */ } });
+  const p = await ctx2.newPage();
+  p.errors = [];
+  p.on('pageerror', (e) => p.errors.push(e.message));
+  await guest(p, 'sample-primary');
+  const ms = await p.evaluate(() => new Promise((res) => {
+    const s = performance.now();
+    document.querySelector('#auto-solve').click();
+    const tick = () => (document.querySelector('#tab-board')?.dataset.solve === 'done' ? res(performance.now() - s) : requestAnimationFrame(tick));
+    requestAnimationFrame(tick);
+  }));
+  assert.ok(ms < 1100, `ไม่มีขั้นต่ำ 1.2 วิ (${Math.round(ms)} ms)`);
+  await toastText(p, /จัดเสร็จ \d+ คาบ/);
+  const d = await store(p);
+  assert.equal(await p.locator('#tab-board .tt .cell.m-pre').count(), 0);
+  assert.ok(await p.locator('#tab-board .tt .cell').count() > 0);
+  await p.waitForTimeout(1200);
+  // นับทุกอย่าง รวมไอคอนสำเร็จของ SweetAlert2 (app.css ตัด animation ของ .swal2-icon ใต้ reduce/tt-still แล้ว)
+  const run = await p.evaluate(() => document.getAnimations().filter((a) => a.playState === 'running').map((a) => {
+    const t = a.effect?.target;
+    return `${a.animationName || a.transitionProperty || a.constructor.name}@${t?.className?.baseVal ?? t?.className ?? ''}`;
+  }));
+  assert.deepEqual(run, [], 'animation ที่ยังวิ่ง');
+  assert.equal(await p.locator('.m-confetti, .boon-confetti i, .boon-arrow').count(), 0);
+  assert.ok(await p.locator('.m-hint-still').count() >= 1, 'ปุ่มเป้ามีขอบทองค้างแทน pulse');
+  assert.equal(await p.locator('.overview-map .ov-nums b').first().textContent(), String(d.placements.length));
+  assert.deepEqual(p.errors, []);
+  await ctx2.close();
+});
+
+await test('มือถือ 390×844 (ลองใช้ประถม): หัว 56+44px · ตารางเห็นโดยไม่เลื่อน · ปุ่ม ≥ 40px · จัดไม่ลง → ครูบูรณ์เปิดเอง ปุ่ม "ดูวิธีแก้" อยู่ในจอ', async () => {
+  const m = await open({ width: 390, height: 844 });
+  const p = m.page;
+  await guest(p, 'sample-primary');
+  await p.waitForTimeout(300);
+  const g = await p.evaluate(() => {
+    const r1 = document.querySelector('.bar-row1').getBoundingClientRect(), r2 = document.querySelector('.bar-row2').getBoundingClientRect();
+    const small = [...document.querySelectorAll('#tab-board .toolbar button, #tab-board .toolbar select, #tab-board .toolbar summary, .bar-row1 summary, .bar #save-state')]
+      .filter((b) => b.offsetParent && b.getBoundingClientRect().height > 0).map((b) => [b.id || b.textContent.trim().slice(0, 12), Math.round(b.getBoundingClientRect().height)]).filter(([, h]) => h < 40);
+    return { h1: r1.height, h2: r2.height, thead: document.querySelector('.tt thead').getBoundingClientRect().top, sw: document.documentElement.scrollWidth, save: document.querySelector('#save-state').textContent, small };
+  });
+  assert.ok(g.h1 <= 56 && g.h2 <= 44, `ส่วนหัว ${g.h1}+${g.h2}`);
+  assert.ok(g.thead < 560, `.tt thead top = ${g.thead}`);
+  assert.ok(g.sw <= 390, 'scrollWidth ' + g.sw);
+  assert.match(g.save, /บันทึกแล้ว/);
+  assert.deepEqual(g.small, [], 'ปุ่มเล็กกว่า 40px');
+  // เลื่อนลง: แถว 1 ยังติดจอ (sticky) · เมนู ⋯ เปิดแล้วอยู่ในจอ
+  await p.evaluate(() => window.scrollTo(0, 600));
+  assert.ok(Math.abs(await p.evaluate(() => document.querySelector('.bar-row1').getBoundingClientRect().top)) < 1, 'แถว 1 ติดจอ');
+  await p.click('.bar-more > summary');
+  const menu = await p.locator('.bar-more .bar-user').boundingBox();
+  assert.ok(menu && menu.x >= 0 && menu.x + menu.width <= 390, 'เมนู ⋯ อยู่ในจอ');
+  await shot(p, '28-mobile-menu');
+  await p.mouse.click(30, 700);
+  assert.equal(await p.locator('.bar-more[open]').count(), 0, 'แตะนอกเมนู = ปิด');
+  for (const t of ['periods', 'data', 'export', 'board']) {
+    await gotoTab(p, t);
+    assert.ok((await pageWidth(p)) <= 390, `แท็บ ${t} กว้าง ${await pageWidth(p)}`);
+    await assertStyle(p, 'mobile ' + t);
+  }
+  // ทำให้จัดไม่ลง แล้วจัด
+  await p.evaluate(async () => {
+    const { store } = await import('./assets/store.js');
+    const load = new Map();
+    for (const a of store.doc.assignments) if (a.teacherId) load.set(a.teacherId, (load.get(a.teacherId) || 0) + a.perWeek);
+    const [id] = [...load.entries()].sort((a, b) => b[1] - a[1])[0];
+    store.doc.teachers.find((t) => t.id === id).maxPerDay = 1;
+    store.commit('data');
+  });
+  await p.evaluate(() => window.scrollTo(0, 0));
+  await p.click('#auto-solve');
+  await solveDone(p);
+  const see = p.locator('.boon[data-mode="sheet"] .boon-acts button', { hasText: 'ดูวิธีแก้' });
+  await see.waitFor({ timeout: 5000 });
+  const b = await see.boundingBox();
+  assert.ok(b && b.y >= 0 && b.y + b.height <= 844, 'ปุ่ม "ดูวิธีแก้" อยู่ในจอ');
+  await shot(p, '29-mobile-comfort');
+  await see.click();
+  await p.waitForTimeout(700);
+  const fixIn = await p.evaluate(() => {
+    const f = document.querySelector('#tab-board [data-fix].btn-primary');
+    const r = f?.getBoundingClientRect();
+    return { hint: f?.hasAttribute('data-next-hint'), inView: !!r && r.top >= 0 && r.bottom <= innerHeight, open: !!f?.closest('details[open]') };
+  });
+  assert.ok(fixIn.hint && fixIn.inView && fixIn.open, 'ปุ่มแก้สีทองตัวแรกถูกชี้ อยู่ในจอ และอยู่ในข้อที่กางไว้: ' + JSON.stringify(fixIn));
+  assert.equal(await p.locator('.swal2-popup:not(.swal2-toast)').count(), 0);
+  assert.ok((await pageWidth(p)) <= 390);
+  await assertStyle(p, 'mobile board report');
+  assert.deepEqual(await check(p, 'mobile delight'), []);
+  await m.ctx.close();
+});
 
 await test('หน้าแรก (ไม่ล็อกอิน): #donate กางเอง · 390px ไม่มีเลื่อนแนวนอน · ไม่มีสีเขียว/แถบขอบซ้าย · ไม่มี console/CSP', async () => {
   for (const vp of [{ width: 390, height: 844 }, { width: 1366, height: 900 }]) {

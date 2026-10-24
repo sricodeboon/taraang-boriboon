@@ -93,7 +93,9 @@ function oauth_finish(string $p, string $code, string $state): array {
         ]);
         $info = http_get_json('https://openidconnect.googleapis.com/v1/userinfo', (string) ($tok['access_token'] ?? ''));
         if (empty($info['sub'])) throw new RuntimeException('ไม่ได้รับข้อมูลบัญชี Google');
-        return ['uid' => (string) $info['sub'], 'name' => $info['name'] ?? null, 'email' => $info['email'] ?? null, 'avatar' => $info['picture'] ?? null];
+        // เก็บอีเมลเฉพาะที่ Google ยืนยันแล้ว (is_admin ใช้อีเมลนี้ตัดสินสิทธิ์ผู้ดูแล)
+        $email = (($info['email_verified'] ?? false) === true || ($info['email_verified'] ?? '') === 'true') ? ($info['email'] ?? null) : null;
+        return ['uid' => (string) $info['sub'], 'name' => $info['name'] ?? null, 'email' => $email, 'avatar' => $info['picture'] ?? null];
     }
 
     if ($p === 'line') {

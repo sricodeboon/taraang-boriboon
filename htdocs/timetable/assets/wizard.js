@@ -6,6 +6,7 @@
 import { store, uid, esc, DAY_NAMES } from './store.js';
 import { buildPeriods, subjectsForLevels, termSem, levelKey } from './rules.js';
 import * as notify from './notify.js';
+import * as motion from './motion.js';
 
 export const LEVELS = ['อ.1', 'อ.2', 'อ.3', 'ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6', 'ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'];
 const BANDS = [['อ', 'อนุบาล'], ['ป', 'ประถม'], ['ม', 'มัธยม']];
@@ -243,6 +244,7 @@ export async function open({ auto = false } = {}) {
         <div class="field"><label for="wz-brk">พักกลางวัน</label><select class="input" id="wz-brk" data-t="breakAfter"></select></div>
         ${num('wz-brkmin', st.time.breakMinutes, 10, 120, 'นาทีพัก', 'data-t="breakMinutes"')}
       </div>
+      <div class="wz-preview" aria-label="โครงคาบที่จะได้" role="img" data-pv></div>
       <div class="wz-grid"><div class="field"><label for="wz-days">วันเรียน/สัปดาห์</label><select class="input" id="wz-days">${[5, 6, 7].map((n) => `<option value="${n}" ${st.days === n ? 'selected' : ''}>${n} วัน (${DAY_NAMES[0]}–${DAY_NAMES[n - 1]})</option>`).join('')}</select></div></div>`)}
     ${q(4, 'กิจกรรมประจำ (คาบล็อก ห้ามจัดวิชาทับ)', `<div class="wz-acts">${ACTS.map((a) => `<div class="wz-act" data-act="${a.key}">
         <label><input type="checkbox" data-a="on"> <b>${a.label}</b> <span class="hint" data-note></span></label>
@@ -250,6 +252,7 @@ export async function open({ auto = false } = {}) {
         <select class="input input-sm" data-a="period" aria-label="คาบของ${a.label}"></select></div>`).join('')}</div>`)}
     <section class="wz-prev" aria-live="polite" data-prev></section>
     <div class="wz-foot">
+      <p class="wz-sum" aria-live="polite" data-sum>จะได้: ห้อง <b data-n="classes">0</b> · วิชา <b data-n="subjects">0</b> · การสอน <b data-n="assignments">0</b> · คาบล็อก <b data-n="locks">0</b></p>
       <button class="btn" value="later" formnovalidate>ไว้ทีหลัง</button>
       <button class="btn btn-primary" value="ok" data-ok>สร้างข้อมูลเริ่มต้น</button>
     </div>
@@ -275,7 +278,13 @@ export async function open({ auto = false } = {}) {
   const drawTime = () => {
     const off = st.keepPeriods;
     dlg.querySelectorAll('[data-time] input, [data-time] select').forEach((x) => { x.disabled = off; });
-    for (const [k, v] of Object.entries(st.time)) { const el = dlg.querySelector(`[data-t="${k}"]`); if (el && el.tagName === 'INPUT' && document.activeElement !== el) el.value = v; }
+    for (const [k, v] of Object.entries(st.time)) {
+      const el = dlg.querySelector(`[data-t="${k}"]`);
+      if (!el || el.tagName !== 'INPUT' || document.activeElement === el) continue;
+      const changed = el.value !== String(v);
+      el.value = v;
+      if (changed && shown) motion.once(el, 'm-flash'); // ค่าที่ระบบเปลี่ยนให้ (ตามชั้นที่เลือก) พื้นทองจาง — เห็นว่าอะไรเปลี่ยน
+    }
     const brk = $('#wz-brk'), n = int(st.time.count, 6, 1, 12);
     brk.innerHTML = `<option value="0">ไม่มีพัก</option>` + [...Array(Math.max(0, n - 1)).keys()].map((i) => `<option value="${i + 1}">หลังคาบที่ ${i + 1}</option>`).join('');
     brk.value = String(Math.min(int(st.time.breakAfter, 0, 0, 19), n - 1) || 0);
@@ -304,9 +313,13 @@ export async function open({ auto = false } = {}) {
   const drawPrev = () => {
     const ans = answers();
     const ok = $('[data-ok]');
-    if (!ans.levels.length) { $('[data-prev]').innerHTML = '<p class="hint" style="margin:0">เลือกชั้นที่เปิดสอนอย่างน้อย 1 ชั้น แล้วจะเห็นตัวอย่างข้อมูลที่จะสร้างตรงนี้</p>'; ok.disabled = true; return; }
+    drawPeriods();
+    if (!ans.levels.length) { $('[data-prev]').innerHTML = '<p class="hint" style="margin:0">เลือกชั้นที่เปิดสอนอย่างน้อย 1 ชั้น แล้วจะเห็นตัวอย่างข้อมูลที่จะสร้างตรงนี้</p>'; ok.disabled = true; drawSum(null); return; }
+    // ปุ่มสร้างกดได้ครั้งแรก → เรือง 2 รอบ (บอกว่าพร้อมแล้ว)
+    if (ok.disabled && !okPulsed && shown) { okPulsed = true; motion.once(ok, 'wz-ok-pulse'); }
     ok.disabled = false;
     const p = planSetup(ans, cur, doc);
+    drawSum({ classes: p.classes.length, subjects: p.subjects.length + p.reused, assignments: p.assignments.length, locks: p.locks.length });
     const names = p.classes.map((c) => c.name);
     const sem = termSem(doc.term.name);
     const hasSec = ans.levels.some((l) => l[0] === 'ม');
@@ -320,6 +333,51 @@ export async function open({ auto = false } = {}) {
         ${p.assignments.length ? '' : '<li class="hint">ชั้นอนุบาลยังไม่มีรายวิชาตามหลักสูตรให้อัตโนมัติ เพิ่มวิชาเองได้ที่ ข้อมูล → วิชา</li>'}
       </ul>
       ${p.warnings.map((w) => `<div class="wz-warn" role="note"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="flex:none;margin-top:2px;color:var(--gold)"><path fill="currentColor" d="M12 2 1 21h22L12 2zm0 6 1 7h-2l1-7zm-1 9h2v2h-2v-2z"/></svg><span>${esc(w)}</span></div>`).join('')}`;
+  };
+  // สรุปสดท้ายกล่อง: ตัวเลขนับขึ้น/ลงจากค่าที่แสดงอยู่ (ไม่มีชั้น = จางลง แต่จองที่ไว้ ความสูงกล่องไม่เปลี่ยน)
+  let okPulsed = false, shown = false;
+  const drawSum = (n) => {
+    const box = $('[data-sum]');
+    box.classList.toggle('off', !n);
+    if (!n) return;
+    for (const b of box.querySelectorAll('[data-n]')) {
+      const to = n[b.dataset.n] || 0;
+      if (b.dataset.to === String(to)) continue;
+      if (shown) motion.countUp(b, to, { dur: 600 }); else { b.textContent = String(to); b.dataset.to = String(to); }
+    }
+  };
+  // โครงคาบสด (ใต้ข้อ 3): กล่องละคาบ + ช่องพัก · ใบใหม่ไหลเข้าจากซ้าย ใบที่หายจางออก · แถวเดียวเสมอ (จองความสูงไว้)
+  const drawPeriods = () => {
+    const box = $('[data-pv]');
+    const ps = periodsNow();
+    const want = ps.map((x) => (x.type === 'break' ? 'b' : 'c'));
+    const live = [...box.children].filter((x) => !x.classList.contains('m-out'));
+    live.forEach((el, i) => {
+      const x = ps[i];
+      if (!x || el.dataset.kind !== want[i]) return;
+      el.title = `${x.type === 'break' ? x.label || 'พัก' : 'คาบ ' + x.label} ${x.start || ''}–${x.end || ''}`;
+      el.querySelector('small').textContent = x.start || '';
+    });
+    // หาจุดแรกที่ชนิดไม่ตรง → ตัดตั้งแต่ตรงนั้น แล้วเติมใหม่ (ส่วนใหญ่ = เพิ่ม/ลดท้ายแถว หรือย้ายช่องพัก)
+    let k = 0;
+    while (k < live.length && k < want.length && live[k].dataset.kind === want[k]) k++;
+    for (const el of live.slice(k)) {
+      if (motion.still() || !shown) { el.remove(); continue; }
+      el.classList.add('m-out');
+      el.addEventListener('animationend', () => el.remove(), { once: true });
+    }
+    let n = 0;
+    ps.slice(k).forEach((x, j) => {
+      const el = document.createElement('span');
+      el.className = 'pv' + (x.type === 'break' ? ' b' : '');
+      el.dataset.kind = want[k + j];
+      el.title = `${x.type === 'break' ? x.label || 'พัก' : 'คาบ ' + x.label} ${x.start || ''}–${x.end || ''}`;
+      el.innerHTML = `<b>${esc(x.type === 'break' ? 'พัก' : x.label)}</b><small>${esc(x.start || '')}</small>`;
+      if (shown) { el.classList.add('m-in-l'); el.style.animationDelay = `calc(${n++ * 30}ms * var(--m, 1))`; }
+      // ใบที่กำลังจางออกยังอยู่ท้ายแถว → ใบใหม่แทรกก่อนใบเหล่านั้น
+      box.insertBefore(el, box.querySelector('.m-out'));
+    });
+    box.setAttribute('aria-label', `โครงคาบที่จะได้ ${ps.filter((x) => x.type !== 'break').length} คาบต่อวัน`);
   };
   const levelsChanged = () => {
     dlg.querySelectorAll('[data-lv]').forEach((c) => { c.checked = st.levels.has(c.dataset.lv); });
@@ -359,7 +417,17 @@ export async function open({ auto = false } = {}) {
   dlg.addEventListener('click', (e) => {
     const b = e.target.closest('button[type=button]');
     if (!b) return;
-    if (b.dataset.preset != null) { st.levels = new Set(PRESETS[+b.dataset.preset][1]); levelsChanged(); }
+    if (b.dataset.preset != null) {
+      st.levels = new Set(PRESETS[+b.dataset.preset][1]);
+      levelsChanged(); // ติ๊กจริงทันที — ส่วนที่ไล่เด้งทีละใบเป็นแค่ภาพ
+      let i = 0;
+      dlg.querySelectorAll('[data-lv]').forEach((c) => {
+        if (!c.checked) return;
+        const lab = c.closest('label');
+        lab.style.animationDelay = `calc(${i++ * 40}ms * var(--m, 1))`;
+        motion.once(lab, 'm-pop').then(() => { lab.style.animationDelay = ''; });
+      });
+    }
     else if (b.matches('[data-custom]')) {
       st.custom = !st.custom;
       if (st.custom) for (const l of st.levels) st.rooms[l] ??= st.perLevel;
@@ -368,6 +436,13 @@ export async function open({ auto = false } = {}) {
   });
   levelsChanged();
   dlg.showModal();
+  // เปิด: กล่อง tt-modal-in (app.css) · การ์ดข้อ 1–4 ไหลขึ้นไล่ทีละใบ 70ms · ครูบูรณ์พยักหน้า
+  const form = $('form');
+  form.classList.add('m-stagger');
+  motion.staggerVars(form, { each: 70, max: 420 });
+  dlg.querySelectorAll('.wz-q').forEach((q) => motion.once(q, 'm-in'));
+  motion.nod($('[data-wz-img]'));
+  shown = true;
   $('[data-preset="0"]')?.focus(); // ทางลัดแรก (หัวกล่องอ่านได้ผ่าน aria-labelledby)
 
   dlg.addEventListener('close', () => {
@@ -380,7 +455,13 @@ export async function open({ auto = false } = {}) {
     const before = applySetup(doc, plan);
     setSkip(termId, false);
     store.commit('wizard');
-    document.dispatchEvent(new CustomEvent('tt:goto', { detail: { tab: 'data', section: 'teachers' } }));
+    // ชิปหมวดในแท็บข้อมูลนับขึ้นจาก 0 พร้อมกัน แล้วเปิดกล่องวางรายชื่อครูต่อทันที (ขั้นต่อไปจริง ๆ) — ปิดได้ ไม่บังคับ
+    const empty = { classes: 0, teachers: 0, subjects: 0, rooms: doc.rooms.length, assignments: 0 };
+    import('./data.js').then((m) => m.countFrom?.(empty)).catch(() => {}).finally(() => {
+      document.dispatchEvent(new CustomEvent('tt:goto', { detail: { tab: 'data', section: 'teachers' } }));
+      // เบราว์เซอร์อัตโนมัติ (ทดสอบ e2e เดิม) ไม่เปิดเอง — กล่อง modal จะบังขั้นทดสอบถัดไป
+      if (!navigator.webdriver) import('./import.js').then((imp) => imp.openPaste('teachers')).catch(() => {});
+    });
     notify.action(`สร้างห้อง ${plan.classes.length} ห้อง · วิชา ${plan.subjects.length + plan.reused} · การสอนร่าง ${plan.assignments.length} แถวแล้ว — ขั้นต่อไป: เพิ่มครู`, 'เลิกทำ', () => {
       if (store.doc !== doc) return;
       undoSetup(doc, before);
@@ -418,6 +499,19 @@ function css() {
 .wz-periods span.b{background:var(--lock);color:var(--lock-ink)}
 .wz-warn{background:var(--gold-soft);border:1px solid var(--gold-bg);border-radius:10px;padding:8px 10px;font-size:.88rem;display:flex;gap:8px}
 .wz-foot{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;position:sticky;bottom:0;background:var(--surface);padding:10px 0 2px;border-top:1px solid var(--line)}
-@media (max-width:560px){.wz form{padding:14px}.wz-head img{display:none}.wz-act{grid-template-columns:1fr 1fr}.wz-act>label{grid-column:1/-1}}`;
+.wz-preview{display:flex;gap:4px;height:42px;overflow:hidden;align-items:stretch}
+.wz-preview .pv{flex:1 1 0;min-width:0;display:grid;place-content:center;justify-items:center;border:1px solid var(--blue);border-radius:6px;background:var(--blue-soft);color:var(--ink);line-height:1.1}
+.wz-preview .pv b{font-size:.82rem}.wz-preview .pv small{font-size:.62rem;color:var(--muted);font-family:var(--mono);white-space:nowrap;overflow:hidden;max-width:100%}
+.wz-preview .pv.b{flex:.7 1 0;border-style:dashed;border-color:var(--line);background:var(--lock);color:var(--lock-ink)}
+.wz-sum{margin:0 auto 0 0;align-self:center;font-size:.88rem;color:var(--muted);transition:opacity var(--d-2,200ms)}
+.wz-sum b{color:var(--ink);font-variant-numeric:tabular-nums;display:inline-block;min-width:1.2em;text-align:center}
+.wz-sum.off{opacity:.35}
+.wz .btn.wz-ok-pulse{animation:m-pulse calc(1.4s * var(--m,1)) var(--e-out,ease-out) 2}
+.wz-chips label.m-pop{transform-origin:center}
+@keyframes wz-sheet-in{from{transform:translateY(32px);opacity:.4}}
+@media (max-width:560px){.wz form{padding:14px}.wz-head img{display:none}.wz-act{grid-template-columns:1fr 1fr}.wz-act>label{grid-column:1/-1}
+  dialog.wz{width:100%;max-width:100%;margin:auto 0 0;max-height:calc(100dvh - 12px);border-radius:16px 16px 0 0}
+  dialog.wz[open]{animation:wz-sheet-in var(--d-3,320ms) var(--e-out,ease-out)}
+  .wz-sum{flex-basis:100%}.wz-foot .btn{flex:1}.wz-preview small{display:none}}`;
   document.head.appendChild(s);
 }

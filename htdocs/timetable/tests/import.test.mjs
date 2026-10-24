@@ -1,6 +1,7 @@
 // ทดสอบการวางรายชื่อ ครู / วิชา / ภาระสอน (assets/import.js) + sanitize ฟิลด์ใหม่ — รัน: node htdocs/timetable/tests/import.test.mjs
 // วางจาก Excel (tab มี/ไม่มีหัว) · LINE ทีละบรรทัด · คอลัมน์ `|` · คำนำหน้า · ชื่อย่อซ้ำ · ครูซ้ำ · วิชา · ภาระสอนขยายห้อง · merge3
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   parseTable, parseTeachers, parseSubjects, parseWorkload, applyTeachers, applySubjects, applyWorkload, undoImport,
   stripPrefix, normClass, resolveClasses, EXAMPLES,
@@ -282,6 +283,44 @@ test('ความเร็ว: วางภาระ 300 แถว + ครู 
   assert.equal(parseTeachers(tl, d).rows.length, 40);
   assert.equal(parseWorkload(wl, d).rows.length, 300);
   assert.ok(performance.now() - t0 < 200);
+});
+
+// ---------- DELIGHT ก-1/ก-6 (24 ต.ค. 69): sanitize เพดาน perWeek · ตัดคาบที่วัน/คาบเสีย · pinned เป็นจริง/เท็จ ----------
+test('ก-6 sanitize: วัน/คาบเสียถูกตัด (อาร์เรย์เดิม) · ค่าเกินช่วงตารางยังอยู่ · perWeek 999999 → 60 · pinned yes → true', () => {
+  const d = clone(school);
+  const a0 = d.assignments[0].id;
+  d.assignments[0].perWeek = 999999; d.assignments[0].doubles = 999;
+  d.placements = [
+    { assignmentId: a0, day: 'abc', period: 1 }, { assignmentId: a0, day: 7, period: 9 }, { assignmentId: a0, day: 1.5, period: 0 },
+    { assignmentId: a0, day: 0, period: -1 }, { assignmentId: a0, day: NaN, period: 0 }, { assignmentId: a0, day: '2', period: 1, pinned: 'yes' },
+    { assignmentId: a0, day: 3, period: 0, pinned: 0 }, { assignmentId: a0, day: 4, period: 0, pinned: '0' },
+  ];
+  d.locks = [{ classId: null, day: 'x', period: 1, label: 'เสีย' }, { classId: null, day: 2, period: 1, label: 'ลูกเสือ' }];
+  const pl = d.placements, lk = d.locks;
+  store.doc = d; index();
+  assert.equal(d.placements, pl, 'ต้องแก้ในอาร์เรย์เดิม');
+  assert.equal(d.locks, lk);
+  assert.deepEqual(d.placements.map((p) => [p.day, p.period]), [[7, 9], [2, 1], [3, 0], [4, 0]]);
+  assert.equal(d.placements[1].pinned, true);
+  assert.equal(d.placements[2].pinned, false);
+  assert.equal(d.placements[3].pinned, false);
+  assert.ok(!('pinned' in d.placements[0]), 'ไม่มี pinned = ไม่เพิ่มฟิลด์');
+  assert.deepEqual(d.locks.map((l) => l.label), ['ลูกเสือ']);
+  assert.equal(d.assignments[0].perWeek, 60);
+  assert.equal(d.assignments[0].doubles, 30);
+});
+
+test('ก-6 เอกสารปกติ (sample 2 ไฟล์ + ภาคเรียนเก่า) ผ่าน sanitize แล้ว ตาราง/คาบล็อก/การสอน JSON เท่าเดิม', () => {
+  const docs = [clone(school)];
+  for (const f of ['sample-school.json', 'sample-primary.json']) docs.push(JSON.parse(readFileSync(new URL('../assets/solver/' + f, import.meta.url), 'utf8')));
+  for (const d of docs) {
+    const before = JSON.stringify([d.placements ?? [], d.locks ?? [], d.assignments]);   // sample ไม่มี placements = []
+    store.doc = d; index();
+    assert.equal(JSON.stringify([d.placements, d.locks, d.assignments]), before);
+    const once = JSON.stringify(d);
+    index();
+    assert.equal(JSON.stringify(d), once, 'sanitize ซ้ำต้องได้ค่าเดิม');
+  }
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

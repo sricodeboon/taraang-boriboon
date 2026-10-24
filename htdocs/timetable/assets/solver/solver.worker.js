@@ -4,10 +4,14 @@
 //   const w = new Worker(new URL('./solver/solver.worker.js', import.meta.url), { type: 'module' });
 //   w.postMessage({ type: 'solve', input, options: { timeLimitMs: 4000, seed: 1 } });
 //   w.onmessage = (e) => {
-//     e.data.type === 'progress' → { pct (0..1), best: { hardViolations, softScore }, phase, iterations, ms }
+//     e.data.type === 'progress' → { pct (0..1), best: { hardViolations, softScore }, phase, iterations, ms,
+//                                    pctMono (ไม่ถอยหลัง), placed, total,                       ← ใหม่ (optional)
+//                                    placements?: [{assignmentId, day, period}] | delta?: {add, remove} }  ← snapshot ของคาบที่วางได้ไม่ชน
+//     e.data.type === 'phase'    → { phase: 'greedy'|'hard'|'repair'|'soft', ms }   ← ใหม่: ยิงทันทีเมื่อเปลี่ยน (ไม่ throttle)
 //     e.data.type === 'done'     → { result }   (รูปแบบตาม solve())
 //     e.data.type === 'error'    → { message }
 //   };
+// ปิด snapshot: options.progressPlacements = false (หน้าเก่า/เครื่องช้า) · ผู้รับรุ่นเดิมไม่รู้จัก 'phase' ก็ข้ามได้ตามเดิม
 // ยกเลิกกลางคัน: w.terminate()
 // ส่วนเสริม: { type: 'validate', input, placements } → { type: 'validated', conflicts }
 
@@ -22,7 +26,13 @@ self.onmessage = async (e) => {
     const { solve, validate } = await ready;
     if (msg.type === 'solve') {
       const options = Object.assign({}, msg.options || {}, {
-        onProgress: (p) => self.postMessage({ type: 'progress', pct: p.pct, best: p.best, phase: p.phase, iterations: p.iterations, ms: p.ms }),
+        onProgress: (p) => {
+          const m = { type: 'progress', pct: p.pct, best: p.best, phase: p.phase, iterations: p.iterations, ms: p.ms, pctMono: p.pctMono, placed: p.placed, total: p.total };
+          if (p.placements) m.placements = p.placements;
+          if (p.delta) m.delta = p.delta;
+          self.postMessage(m);
+        },
+        onPhase: (p) => self.postMessage({ type: 'phase', phase: p.phase, ms: p.ms }),
       });
       const result = solve(msg.input, options);
       self.postMessage({ type: 'done', result });

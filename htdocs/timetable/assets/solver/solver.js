@@ -41,13 +41,24 @@ export const SOFT_WEIGHTS = Object.freeze({
   sameDay: 10,      // วิชาเดียวกันในห้องเดียว วันเดียวกันเกิน 1 ครั้ง (คู่คาบนับ 1) — ต่อครั้งที่เกิน
   adjacentDays: 2,  // วิชาเดียวกันเรียนวันติดกัน (เช่น จ.+อ.) — ต่อคู่วัน (ช่วยกระจายทั่วสัปดาห์)
   teacherGap: 1,    // คาบว่างแทรกของครู (ระหว่างคาบแรกกับคาบสุดท้ายของวัน ไม่นับช่องพัก) — ต่อคาบ
+  // ── ใช้เฉพาะเมื่อมี assignments[].group อย่างน้อย 1 แถว (หรือส่ง options.weights ระบุเอง) — ไม่มี group = ผลเท่าเดิม 100% ──
+  morningCore: 3,   // วิชาหลัก (TH MA SC FL) ลงช่วงบ่าย — ต่อคาบ (คาบสุดท้ายของวันนับ 2 เท่า)
+  classGap: 4,      // ห้องเรียนมีคาบว่างกลางวัน (ระหว่างคาบเรียนแรก–สุดท้ายของวัน ไม่นับพัก/คาบล็อก) — ต่อคาบ
 });
+
+/** กลุ่มสาระที่นับเป็น "วิชาหลัก" (ควรอยู่ช่วงเช้า) — รหัสชุดเดียวกับ rules.SUBJECT_GROUP_CODES */
+const CORE_GROUPS = new Set(['TH', 'MA', 'SC', 'FL']);
+const KNOWN_GROUPS = new Set(['TH', 'MA', 'SC', 'SO', 'HE', 'AR', 'OC', 'FL', 'EC', 'GU']);
 
 /** ประเภทข้อขัดแย้งแข็งที่ validate() คืนได้ */
 export const CONFLICT_TYPES = Object.freeze(['class', 'teacher', 'room', 'lock', 'break', 'unavailable', 'maxPerDay', 'double']);
 
 const W_HARD = 100000;     // น้ำหนักรวมของ hard 1 หน่วย (มากพอให้ soft ไม่มีทางกลบ)
 const MAX_PERIODS = 30;    // ใช้ bitmask 32 บิตต่อวัน จึงรองรับได้ไม่เกิน 30 ช่องต่อวัน
+/** เพดานคาบ/สัปดาห์ต่องานสอน (เกิน = ข้อมูลผิดปกติ เช่น ไฟล์สำรองแก้มือ) — ตรงกับ store.sanitize */
+export const MAX_PER_ASSIGNMENT = 60;
+/** เพดานหน่วยรวมทั้งโรงเรียน (กันจัดค้างเมื่อข้อมูลใหญ่ผิดปกติ) — แถวที่ทำให้เกินตั้งแต่ตัวนั้นไปได้ BAD_DATA what:'units' */
+export const MAX_UNITS = 20000;
 
 const now = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
   ? () => performance.now()
@@ -178,17 +189,18 @@ function buildModel(raw) {
   const aCls = new Int32Array(A).fill(-1), aTch = new Int32Array(A).fill(-1), aRoom = new Int32Array(A).fill(-1);
   const aPer = new Int32Array(A), aDbl = new Int32Array(A), aGrp = new Int32Array(A).fill(-1);
   const aBad = new Array(A).fill(null);
+  const aBadWhat = new Array(A).fill(null);   // 'class' | 'perWeek' | 'units' (ใช้เป็น params.what ของ BAD_DATA)
   const grpMap = new Map();
-  let G = 0;
+  let G = 0, unitSum = 0, unitsOver = false;
   for (let i = 0; i < A; i++) {
     const a = asgs[i] || {};
     const ak = keyOf(a.id);
     if (ak !== null && !aIdx.has(ak)) aIdx.set(ak, i);
     const per = Math.max(0, Math.floor(Number(a.perWeek) || 0));
-    aPer[i] = per;
+    aPer[i] = Math.min(per, 1e9);   // Int32Array — กันค่าใหญ่ผิดปกติล้นจนกลายเป็นเลขติดลบ
     aDbl[i] = Math.min(Math.max(0, Math.floor(Number(a.doubles) || 0)), Math.floor(per / 2));
     const c = cIdx.get(keyOf(a.classId));
-    if (c === undefined) { aBad[i] = 'ไม่พบห้องเรียนของงานสอนนี้'; continue; }
+    if (c === undefined) { aBad[i] = 'ไม่พบห้องเรียนของงานสอนนี้'; aBadWhat[i] = 'class'; continue; }
     aCls[i] = c;
     const tk = keyOf(a.teacherId);
     if (tk !== null) {
@@ -202,6 +214,11 @@ function buildModel(raw) {
       if (r === undefined) warnings.push(`งานสอน ${ak} อ้างถึงห้องพิเศษที่ไม่พบ (${rk}) — จัดโดยไม่ตรวจชนห้องพิเศษ`);
       else aRoom[i] = r;
     }
+    // ข้อมูลผิดปกติ: ไม่สร้างหน่วย (คาบที่ปักหมุดไว้ยังคงอยู่และกันช่อง) — รายงานใน unplaced เป็น BAD_DATA
+    if (per > MAX_PER_ASSIGNMENT) { aBad[i] = `คาบ/สัปดาห์เกิน ${MAX_PER_ASSIGNMENT} (ข้อมูลผิดปกติ)`; aBadWhat[i] = 'perWeek'; continue; }
+    if (!unitsOver && unitSum + per - aDbl[i] > MAX_UNITS) unitsOver = true;
+    if (unitsOver) { aBad[i] = `จำนวนคาบรวมทั้งโรงเรียนเกินที่ระบบรับ (สูงสุด ${MAX_UNITS.toLocaleString('en-US')} หน่วย) (ข้อมูลผิดปกติ)`; aBadWhat[i] = 'units'; continue; }
+    unitSum += per - aDbl[i];
     // "วิชาเดียวกันในห้องเดียวกัน" = คู่ (ห้อง, subjectId) ถ้าไม่มี subjectId ใช้ตัวงานสอนเอง
     const sk = keyOf(a.subjectId);
     const gk = c + '|' + (sk === null ? '#' + i : 's' + sk);
@@ -209,8 +226,42 @@ function buildModel(raw) {
     if (g === undefined) { g = G++; grpMap.set(gk, g); }
     aGrp[i] = g;
   }
-  const gDbl = new Int32Array(G);
-  for (let i = 0; i < A; i++) if (aGrp[i] >= 0) gDbl[aGrp[i]] += aDbl[i];
+  // วิชาหลักช่วงเช้า (optional): ป้าย group จาก board.js · solver ไม่รู้จักชื่อวิชา
+  const aCore = new Uint8Array(A);
+  let hasGroup = false;
+  for (let i = 0; i < A; i++) {
+    const a = asgs[i];
+    if (aBad[i] || !a || typeof a.group !== 'string' || !KNOWN_GROUPS.has(a.group)) continue;
+    hasGroup = true;
+    if (CORE_GROUPS.has(a.group)) aCore[i] = 1;
+  }
+  // โทษวิชาหลักต่อคาบ: คาบเรียนหลังช่องพักแรก (ไม่มีพัก = ครึ่งหลังของวัน) = 1 · คาบเรียนสุดท้ายของวัน +1
+  const corePen = new Uint8Array(P);
+  {
+    const cls = [];
+    for (let p = 0; p < P; p++) if (isClass[p]) cls.push(p);
+    let fb = -1;
+    for (let p = 0; p < P; p++) if (!isClass[p] && cls.some((q) => q < p) && cls.some((q) => q > p)) { fb = p; break; }
+    if (fb >= 0) { for (const p of cls) if (p > fb) corePen[p] = 1; }
+    else for (const p of cls.slice(Math.ceil(cls.length / 2))) corePen[p] = 1;
+    if (cls.length > 1) corePen[cls[cls.length - 1]] += 1;
+  }
+  const penStart = new Int32Array(2 * P);   // [L-1][ช่องเริ่ม] ผลรวมโทษของหน่วยยาว L
+  for (let p = 0; p < P; p++) { penStart[p] = corePen[p]; penStart[P + p] = corePen[p] + (p + 1 < P ? corePen[p + 1] : 0); }
+  // คาบล็อกของห้องเป็น bitmask ต่อวัน (นับเป็น "ไม่ว่าง" เวลาคิดคาบว่างกลางวันของห้อง)
+  const lockMaskC = new Int32Array(C * D);
+  for (let c = 0; c < C; c++) for (let d = 0; d < D; d++) {
+    let m = 0;
+    for (let p = 0; p < P; p++) if (isClass[p] && lock[c * S + d * P + p]) m |= 1 << p;
+    lockMaskC[c * D + d] = m;
+  }
+  const gDbl = new Int32Array(G), gOcc = new Int32Array(G);
+  for (let i = 0; i < A; i++) if (aGrp[i] >= 0) { gDbl[aGrp[i]] += aDbl[i]; gOcc[aGrp[i]] += aPer[i] - aDbl[i]; }
+  // ขั้นต่ำเชิงคณิตของ "วิชาเดียวกันลงวันติดกัน" ต่อกลุ่ม: k ครั้ง (คาบคู่นับ 1) ใน D วัน ไม่ซ้ำวัน
+  // ต้องมีคู่วันติดกันอย่างน้อย 2k − D − 1 (ไม่เกิน D − 1) → score() รายงานเฉพาะส่วนที่เกินขั้นต่ำนี้
+  const gMinAdj = new Int32Array(G);
+  let minAdjTotal = 0;
+  for (let g = 0; g < G; g++) { gMinAdj[g] = Math.max(0, Math.min(D - 1, 2 * gOcc[g] - D - 1)); minAdjTotal += gMinAdj[g]; }
 
   // ตารางคำนวณคาบว่างแทรก (gap) จาก bitmask ของครูในหนึ่งวัน
   let gapOf;
@@ -221,8 +272,9 @@ function buildModel(raw) {
     const range = ((2 << last) - 1) ^ ((1 << first) - 1);
     return popcount(range & classBits & ~m);
   };
+  let gapTbl = null;
   if (P <= 16) {
-    const tbl = new Uint8Array(1 << P);
+    const tbl = gapTbl = new Uint8Array(1 << P);
     for (let m = 1; m < tbl.length; m++) tbl[m] = gapCalc(m);
     gapOf = (m) => tbl[m];
   } else gapOf = gapCalc;
@@ -232,10 +284,14 @@ function buildModel(raw) {
     return String(o.name ?? o.short ?? (fallback + ' ' + (o.id ?? i)));
   };
 
+  /** คาบว่างกลางวันของห้อง c วัน d จาก bitmask คาบเรียน m (ไม่มีคาบเรียน = 0) */
+  const classGapOf = (c, d, m) => (m ? gapOf(m | lockMaskC[c * D + d]) : 0);
+
   return {
+    aCore, hasGroup, corePen, penStart, lockMaskC, classGapOf, gapTbl,
     D, P, S, C, T, R, A, G, isClass, classBits, classes, teachers, rooms, asgs,
     cIdx, tIdx, rIdx, aIdx, tMax, tUnav, lock, gLock, lockLabel,
-    aCls, aTch, aRoom, aPer, aDbl, aGrp, aBad, gDbl, gapOf, warnings,
+    aCls, aTch, aRoom, aPer, aDbl, aGrp, aBad, aBadWhat, gDbl, gMinAdj, minAdjTotal, gapOf, warnings,
     fixed: arr(inp.fixed),
     className: (c) => name(classes, c, 'ห้อง'),
     teacherName: (t) => name(teachers, t, 'ครู'),
@@ -385,23 +441,48 @@ export function validate(input, placements) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * คำนวณคะแนน soft จาก placements โดยตรง (ไม่ขึ้นกับสถานะภายใน solver)
- * @returns {{softScore:number, sameDay:number, adjacentDays:number, teacherGaps:number}}
+ * น้ำหนักที่ใช้จริง: SOFT_WEIGHTS ทับด้วย weights (ตัวเลข ≥ 0 เท่านั้น)
+ * morningCore/classGap เป็น 0 ถ้าไม่มีแถวไหนมี group และไม่ได้ระบุใน weights เอง (เข้ากันได้ย้อนหลัง 100%)
  */
-export function score(input, placements) {
+function softWeights(M, weights) {
+  const w = { ...SOFT_WEIGHTS };
+  const given = weights && typeof weights === 'object' ? weights : {};
+  for (const k of Object.keys(w)) { const v = Number(given[k]); if (given[k] != null && Number.isFinite(v) && v >= 0) w[k] = v; }
+  if (!M.hasGroup) for (const k of ['morningCore', 'classGap']) if (given[k] == null) w[k] = 0;
+  return w;
+}
+
+/**
+ * คำนวณคะแนน soft จาก placements โดยตรง (ไม่ขึ้นกับสถานะภายใน solver)
+ * adjacentDays = ส่วนที่ "เกินขั้นต่ำที่เลี่ยงไม่ได้" (ลดได้จริง) · adjacentDaysRaw = จำนวนคู่วันติดกันทั้งหมด
+ * softScore คิดจากค่า raw ตามน้ำหนักเดิม (ค่าเดียวกับที่ search ใช้ — ผลเดิมไม่เปลี่ยน)
+ * morningCore = โทษวิชาหลักช่วงบ่าย (คาบ, คาบสุดท้ายนับ 2) · classGaps = คาบว่างกลางวันของห้อง
+ *   สองค่านี้นับเสมอ แต่รวมใน softScore เฉพาะเมื่อมี group (หรือส่ง weights ระบุ) — ตรงกับที่ solve() ใช้
+ * @param {object} [weights]  ทับน้ำหนัก SOFT_WEIGHTS บางตัว (เหมือน options.weights ของ solve)
+ * @returns {{softScore:number, sameDay:number, adjacentDays:number, adjacentDaysRaw:number, teacherGaps:number, morningCore:number, classGaps:number}}
+ */
+export function score(input, placements, weights) {
   const M = buildModel(input);
-  const { D, P, G, T, aGrp, aTch } = M;
+  const { D, P, G, T, C, aGrp, aTch, aCls } = M;
+  const W = softWeights(M, weights);
   const gMask = new Int32Array(G * D);   // ช่องที่วิชา (กลุ่ม) ลงในแต่ละวัน
   const tMask = new Int32Array(T * D);
+  const cMask = new Int32Array(C * D);
+  let morningCore = 0;
   for (const pl of arr(placements)) {
     if (!pl) continue;
     const a = M.aIdx.get(keyOf(pl.assignmentId));
-    if (a === undefined || aGrp[a] < 0) continue;
+    if (a === undefined || aCls[a] < 0) continue;
     const d = Number(pl.day), p = Number(pl.period);
     if (!isInt(d) || !isInt(p) || d < 0 || d >= D || p < 0 || p >= P) continue;
+    if (M.isClass[p]) cMask[aCls[a] * D + d] |= 1 << p;
+    if (aGrp[a] < 0) continue;
     gMask[aGrp[a] * D + d] |= 1 << p;
     if (aTch[a] >= 0) tMask[aTch[a] * D + d] |= 1 << p;
+    if (M.aCore[a]) morningCore += M.corePen[p];
   }
+  let classGaps = 0;
+  for (let c = 0; c < C; c++) for (let d = 0; d < D; d++) classGaps += M.classGapOf(c, d, cMask[c * D + d]);
   let sameDay = 0, adjacentDays = 0, teacherGaps = 0;
   for (let g = 0; g < G; g++) {
     let dblLeft = M.gDbl[g];
@@ -424,8 +505,8 @@ export function score(input, placements) {
     }
   }
   for (let i = 0; i < T * D; i++) teacherGaps += M.gapOf(tMask[i]);
-  const softScore = SOFT_WEIGHTS.sameDay * sameDay + SOFT_WEIGHTS.adjacentDays * adjacentDays + SOFT_WEIGHTS.teacherGap * teacherGaps;
-  return { softScore, sameDay, adjacentDays, teacherGaps };
+  const softScore = W.sameDay * sameDay + W.adjacentDays * adjacentDays + W.teacherGap * teacherGaps + W.morningCore * morningCore + W.classGap * classGaps;
+  return { softScore, sameDay, adjacentDays: Math.max(0, adjacentDays - M.minAdjTotal), adjacentDaysRaw: adjacentDays, teacherGaps, morningCore, classGaps };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -456,8 +537,14 @@ function prepareUnits(M, warnings) {
     fixedOut.push({ assignmentId: f.assignmentId, day: d, period: p, pinned: true });
   }
   for (let a = 0; a < A; a++) {
-    if (M.aBad[a]) { if (aPer[a] > 0) preUnplaced.push({ a, periods: aPer[a], reason: M.aBad[a] }); continue; }
     const fs = (fixedByA.get(a) || []).sort((x, y) => x - y);
+    if (M.aBad[a]) {
+      // ข้อมูลเสีย: ไม่สร้างหน่วยที่ต้องจัด · แถวที่มีห้องเรียน (perWeek/units เกิน) คาบปักหมุดยังเป็นหน่วยตายตัวกันช่องไว้
+      let pinned = 0;
+      if (aCls[a] >= 0) for (const slot of fs) { uA.push(a); uL.push(1); uFixed.push(1); uStart0.push(slot); pinned++; }
+      if (aPer[a] - pinned > 0) preUnplaced.push({ a, periods: aPer[a] - pinned, reason: M.aBad[a] });
+      continue;
+    }
     let fixedCells = 0, fixedPairs = 0;
     let oddRuns = 0;
     const oddExt = [];   // ช่องข้าง ๆ ของกลุ่มหมุดความยาวคี่ (วางคาบเดี่ยวตรงนี้แล้วจะกลายเป็นคาบคู่)
@@ -489,8 +576,8 @@ function prepareUnits(M, warnings) {
   }
   const U = uA.length;
   const uLen = Int32Array.from(uL), uAsg = Int32Array.from(uA);
-  const uCls = new Int32Array(U), uTch = new Int32Array(U), uRoom = new Int32Array(U), uGrp = new Int32Array(U);
-  for (let u = 0; u < U; u++) { const a = uAsg[u]; uCls[u] = aCls[a]; uTch[u] = aTch[a]; uRoom[u] = aRoom[a]; uGrp[u] = partnerDom.has(u) ? -1 : aGrp[a]; }
+  const uCls = new Int32Array(U), uTch = new Int32Array(U), uRoom = new Int32Array(U), uGrp = new Int32Array(U), uCore = new Uint8Array(U);
+  for (let u = 0; u < U; u++) { const a = uAsg[u]; uCls[u] = aCls[a]; uTch[u] = aTch[a]; uRoom[u] = aRoom[a]; uGrp[u] = partnerDom.has(u) ? -1 : aGrp[a]; uCore[u] = M.aCore[a]; }
 
   // ── 2) โดเมน: ช่องเริ่มที่ผ่านกฎเดี่ยว (พัก/ล็อก/ครูไม่ว่าง/คู่คาบไม่คร่อมพัก) ──
   const domStart = new Int32Array(U + 1);
@@ -527,7 +614,7 @@ function prepareUnits(M, warnings) {
   const domList = Int32Array.from(domTmp);
   const domSize = (u) => domStart[u + 1] - domStart[u];
 
-  return { U, uLen, uAsg, uCls, uTch, uRoom, uGrp, uFixed, uStart0, partnerDom, preUnplaced, fixedOut, domStart, domList, domOk, dead, domSize };
+  return { U, uLen, uAsg, uCls, uTch, uRoom, uGrp, uCore, uFixed, uStart0, partnerDom, preUnplaced, fixedOut, domStart, domList, domOk, dead, domSize };
 }
 
 /**
@@ -639,7 +726,7 @@ function capacityOf(M, X) {
     return null;
   }
   /** งานสอนที่ข้อมูลเสีย (ไม่พบห้องเรียน) */
-  const badWhy = (x) => ({ reason: x.reason, code: 'BAD_DATA', params: { what: 'class', assignmentId: M.asgs[x.a].id ?? null, classId: M.asgs[x.a].classId ?? null } });
+  const badWhy = (x) => ({ reason: x.reason, code: 'BAD_DATA', params: { what: M.aBadWhat[x.a] || 'class', assignmentId: M.asgs[x.a].id ?? null, classId: M.asgs[x.a].classId ?? null } });
   /** หน่วยที่ไม่มีช่องลงได้เลยตั้งแต่ต้น (โดเมนว่าง) */
   function deadWhy(u) {
     const t = uTch[u], c = uCls[u], a = uAsg[u];
@@ -709,8 +796,12 @@ export function capacityCheck(input) {
  * @param {number} [options.seed=1]            seed ของตัวสุ่ม (ค่าเดิม = ผลเดิม)
  * @param {number} [options.maxIterations]     เพดานจำนวนรอบ (ไม่บังคับ)
  * @param {number} [options.effort=1]          ตัวคูณความพยายามช่วงขัดเกลา soft (0.2–5)
- * @param {(p:{pct:number,best:object,iterations:number,ms:number,phase:string})=>void} [options.onProgress]
- *        pct เป็นสัดส่วน 0..1
+ * @param {(p:{pct:number,pctMono:number,placed:number,total:number,best:object,iterations:number,ms:number,phase:string,placements?:Array,delta?:object})=>void} [options.onProgress]
+ *        pct เป็นสัดส่วน 0..1 (อาจถอยได้) · pctMono ไม่ถอยหลัง · placed/total = คาบที่วางได้โดยไม่ชน/คาบทั้งหมด
+ *        placements = snapshot [{assignmentId, day, period}] (≤ 2000) หรือ delta {add, remove} ของ [[id, day, period]] เมื่อใหญ่กว่า
+ * @param {(p:{phase:'greedy'|'hard'|'repair'|'soft', ms:number})=>void} [options.onPhase]  เรียกทันทีเมื่อ phase เปลี่ยน
+ * @param {object}  [options.weights]  ทับน้ำหนัก SOFT_WEIGHTS (เช่น { morningCore: 0 }) · ไม่ส่ง = ค่าเดิม
+ * @param {boolean} [options.progressPlacements=true]  false = ไม่แนบ snapshot ใน progress (หน้าเก่า/เครื่องช้า)
  * @returns {{placements:Array, unplaced:Array, stats:object}}
  */
 export function solve(input, options = {}) {
@@ -721,17 +812,20 @@ export function solve(input, options = {}) {
   const maxIter = Number(opt.maxIterations) > 0 ? Number(opt.maxIterations) : Infinity;
   const effort = Math.min(5, Math.max(0.2, Number(opt.effort) || 1));
   const onProgress = typeof opt.onProgress === 'function' ? opt.onProgress : null;
+  const onPhase = typeof opt.onPhase === 'function' ? opt.onPhase : null;
   const rnd = mulberry32(seed || 1);
   const rint = (n) => (rnd() * n) | 0;
 
   const M = buildModel(input);
   const { D, P, S, C, T, R, A, G, isClass, lock, tUnav, tMax, aCls, aTch, aRoom, aPer, aDbl, aGrp, gapOf } = M;
   const warnings = M.warnings.slice();
-  const WS = SOFT_WEIGHTS.sameDay, WA = SOFT_WEIGHTS.adjacentDays, WG = SOFT_WEIGHTS.teacherGap;
+  const SW = softWeights(M, opt.weights);
+  const WS = SW.sameDay, WA = SW.adjacentDays, WG = SW.teacherGap, WM = SW.morningCore, WCG = SW.classGap;
+  const { penStart, classGapOf, lockMaskC, gapTbl } = M;
 
   // ── 1) แตกเป็นหน่วย + 2) โดเมน (prepareUnits) ─────────────────────────────
   const X = prepareUnits(M, warnings);
-  const { U, uLen, uAsg, uCls, uTch, uRoom, uGrp, uFixed, uStart0, partnerDom, preUnplaced, fixedOut, domStart, domList, domOk, dead, domSize } = X;
+  const { U, uLen, uAsg, uCls, uTch, uRoom, uGrp, uCore, uFixed, uStart0, partnerDom, preUnplaced, fixedOut, domStart, domList, domOk, dead, domSize } = X;
 
   // หน่วยที่ขยับได้ + รายการหน่วยในแต่ละห้อง (ใช้หาคู่สลับ)
   const movTmp = [];
@@ -747,6 +841,7 @@ export function solve(input, options = {}) {
   // ── 3) สถานะ + การประเมินแบบ incremental ─────────────────────────────────
   const clsOcc = new Int16Array(C * S), tchOcc = new Int16Array(T * S), romOcc = new Int16Array(R * S);
   const tchDay = new Int16Array(T * D), tchMask = new Int32Array(T * D), grpDay = new Int16Array(G * D);
+  const clsMask = new Int32Array(C * D);   // คาบเรียนของห้องต่อวัน (ใช้คิด classGap · ดูแลเฉพาะเมื่อ WCG > 0)
   const uPos = new Int32Array(U).fill(-1);
   let hardTot = 0, softTot = 0;
   let gH = 0, gS = 0; // ผลลัพธ์ของ addCost
@@ -776,6 +871,13 @@ export function solve(input, options = {}) {
         if (d + 1 < D && grpDay[gd + 1] > 0) sc += WA;
       }
     }
+    if (WM && uCore[u]) sc += WM * penStart[(L - 1) * P + s];
+    if (WCG) {
+      // = classGapOf(c, d, m | bits) − classGapOf(c, d, m) แบบ inline (ร้อนที่สุดของ search)
+      const cd = c * D + d, m = clsMask[cd], lm = lockMaskC[cd], nm = m | (((1 << L) - 1) << s);
+      const g1 = gapTbl ? gapTbl[nm | lm] : gapOf(nm | lm);
+      sc += WCG * (m ? g1 - (gapTbl ? gapTbl[m | lm] : gapOf(m | lm)) : g1);
+    }
     gH = h; gS = sc;
   }
 
@@ -785,7 +887,7 @@ export function solve(input, options = {}) {
     const L = uLen[u], c = uCls[u], t = uTch[u], r = uRoom[u], g = uGrp[u];
     const d = (slot / P) | 0, s = slot - d * P;
     for (let k = 0; k < L; k++) {
-      clsOcc[c * S + slot + k]++;
+      if (clsOcc[c * S + slot + k]++ === 0 && WCG) clsMask[c * D + d] |= 1 << (s + k);
       if (t >= 0 && tchOcc[t * S + slot + k]++ === 0) tchMask[t * D + d] |= 1 << (s + k);
       if (r >= 0) romOcc[r * S + slot + k]++;
     }
@@ -799,7 +901,7 @@ export function solve(input, options = {}) {
     const L = uLen[u], c = uCls[u], t = uTch[u], r = uRoom[u], g = uGrp[u];
     const d = (slot / P) | 0, s = slot - d * P;
     for (let k = 0; k < L; k++) {
-      clsOcc[c * S + slot + k]--;
+      if (--clsOcc[c * S + slot + k] === 0 && WCG) clsMask[c * D + d] &= ~(1 << (s + k));
       if (t >= 0 && --tchOcc[t * S + slot + k] === 0) tchMask[t * D + d] &= ~(1 << (s + k));
       if (r >= 0) romOcc[r * S + slot + k]--;
     }
@@ -839,6 +941,8 @@ export function solve(input, options = {}) {
       if (n > 1) s += WS * (n - 1);
       if (n > 0 && d + 1 < D && grpDay[g * D + d + 1] > 0) s += WA;
     }
+    if (WCG) for (let c = 0; c < C; c++) for (let d = 0; d < D; d++) s += WCG * classGapOf(c, d, clsMask[c * D + d]);
+    if (WM) for (let u = 0; u < U; u++) if (uCore[u] && uPos[u] >= 0) s += WM * penStart[(uLen[u] - 1) * P + (uPos[u] % P)];
     return { hard: h, soft: s };
   }
 
@@ -847,11 +951,11 @@ export function solve(input, options = {}) {
   const fixedHard = hardTot;
   const base = {
     clsOcc: clsOcc.slice(), tchOcc: tchOcc.slice(), romOcc: romOcc.slice(),
-    tchDay: tchDay.slice(), tchMask: tchMask.slice(), grpDay: grpDay.slice(), hard: hardTot, soft: softTot,
+    tchDay: tchDay.slice(), tchMask: tchMask.slice(), grpDay: grpDay.slice(), clsMask: clsMask.slice(), hard: hardTot, soft: softTot,
   };
   function resetState() {
     clsOcc.set(base.clsOcc); tchOcc.set(base.tchOcc); romOcc.set(base.romOcc);
-    tchDay.set(base.tchDay); tchMask.set(base.tchMask); grpDay.set(base.grpDay);
+    tchDay.set(base.tchDay); tchMask.set(base.tchMask); grpDay.set(base.grpDay); clsMask.set(base.clsMask);
     hardTot = base.hard; softTot = base.soft;
     for (let i = 0; i < nMov; i++) uPos[mov[i]] = -1;
   }
@@ -870,17 +974,63 @@ export function solve(input, options = {}) {
   const deadline = t0 + timeLimit;
   let iter = 0, restarts = 0, timedOut = false, lastReport = t0, phase = 'greedy';
   let bestHardSeen = Infinity, bestSoftSeen = Infinity;
-  function report(pct, force) {
+  // ความคืบหน้า: pct เดิม (อาจถอยได้ในช่วง soft) + pctMono ไม่ถอยหลัง + placed/total = คาบที่วางได้โดยไม่ชน / คาบทั้งหมดที่ต้องวาง
+  // snapshot (placements | delta) ส่งเมื่อ phase เปลี่ยน หรือห่าง ≥ 400ms — อ่านสถานะอย่างเดียว ไม่แตะ RNG/ลำดับค้นหา
+  let pctMax = 0, pctLast = 0, lastSnap = -Infinity, prevSnap = null, finalPlaced = -1;
+  const wantSnap = !!onProgress && opt.progressPlacements !== false;
+  const SNAP_FULL_MAX = 2000;
+  let totalCells = 0, fixedCells = 0;
+  for (let u = 0; u < U; u++) { totalCells += uLen[u]; if (uFixed[u]) fixedCells += uLen[u]; }
+  /** หน่วยที่ขยับได้ซึ่งวางอยู่และไม่ชน (ใช้ทั้งนับ placed และ snapshot) */
+  const settled = (u) => uPos[u] >= 0 && unitHard(u) === 0;
+  function placedCells() {
+    let n = fixedCells;
+    for (let i = 0; i < nMov; i++) { const u = mov[i]; if (settled(u)) n += uLen[u]; }
+    return n;
+  }
+  function snapshotOut() {
+    const cur = [];
+    for (const f of fixedOut) cur.push([f.assignmentId, f.day, f.period]);
+    for (let i = 0; i < nMov; i++) {
+      const u = mov[i];
+      if (!settled(u)) continue;
+      const slot = uPos[u], d = (slot / P) | 0, s0 = slot - d * P, id = M.asgs[uAsg[u]].id;
+      for (let k = 0; k < uLen[u]; k++) cur.push([id, d, s0 + k]);
+    }
+    // จำชุดที่ส่งล่าสุดเสมอ (ทั้งแบบเต็มและ delta) → delta ครั้งถัดไปเทียบกับสิ่งที่ผู้รับมีอยู่จริง
+    const key = (x) => x[0] + '|' + x[1] + '|' + x[2];
+    const was = prevSnap || new Map(), now1 = new Map();
+    for (const x of cur) now1.set(key(x), x);
+    prevSnap = now1;
+    if (cur.length <= SNAP_FULL_MAX) return { placements: cur.map(([assignmentId, day, period]) => ({ assignmentId, day, period })) };
+    // ใหญ่เกิน → ส่งเฉพาะส่วนต่างจาก snapshot ก่อนหน้า (ครั้งแรก = add ทั้งหมด)
+    const add = [], remove = [];
+    for (const [k, x] of now1) if (!was.has(k)) add.push(x);
+    for (const [k, x] of was) if (!now1.has(k)) remove.push(x);
+    return { delta: { add, remove } };
+  }
+  function report(pct, force, snap) {
     if (!onProgress) return;
     const t = now();
     if (!force && t - lastReport < 120) return;
     lastReport = t;
-    try {
-      onProgress({
-        pct: Math.max(0, Math.min(1, pct)), phase, iterations: iter, ms: Math.round(t - t0),
-        best: { hardViolations: bestHardSeen === Infinity ? null : bestHardSeen, softScore: bestSoftSeen === Infinity ? null : bestSoftSeen },
-      });
-    } catch (e) { /* ไม่ให้ callback ทำให้ solver ล้ม */ }
+    pct = Math.max(0, Math.min(1, pct));
+    pctLast = pct;
+    pctMax = Math.max(pctMax, pct);
+    const msg = {
+      pct, pctMono: pctMax, phase, iterations: iter, ms: Math.round(t - t0),
+      best: { hardViolations: bestHardSeen === Infinity ? null : bestHardSeen, softScore: bestSoftSeen === Infinity ? null : bestSoftSeen },
+      placed: finalPlaced >= 0 ? finalPlaced : placedCells(), total: totalCells,
+    };
+    if (wantSnap && finalPlaced < 0 && (snap || t - lastSnap >= 400)) { lastSnap = t; Object.assign(msg, snapshotOut()); }
+    try { onProgress(msg); } catch (e) { /* ไม่ให้ callback ทำให้ solver ล้ม */ }
+  }
+  /** เปลี่ยน phase → แจ้ง onPhase ทันที + ส่ง progress (ไม่ throttle) พร้อม snapshot */
+  function setPhase(p) {
+    if (p === phase) return;
+    phase = p;
+    if (onPhase) { try { onPhase({ phase, ms: Math.round(now() - t0) }); } catch (e) { /* เหมือน onProgress */ } }
+    report(pctLast, true, true);
   }
   function outOfTime(limitAt) {
     const t = now();
@@ -1032,25 +1182,63 @@ export function solve(input, options = {}) {
 
   // ── 7) กรณีแก้ชนไม่หมด: ถอดหน่วยที่ชนออก แล้วลองใส่กลับแบบไม่ชน ──────────
   const unplacedUnits = [];
+  /**
+   * ถอดหน่วย "ชนมากที่สุด" ทีละหน่วยจนไม่ชน — เกณฑ์เลือกเท่ารุ่นเดิมทุกประการ:
+   * unitHard สูงสุด → เท่ากันเลือก uLen ยาวกว่า → เท่ากันเลือก index (u) ต่ำกว่า
+   * ใช้ max-heap แบบ lazy: การถอดหน่วยทำให้ unitHard ของหน่วยอื่น "ลดหรือเท่าเดิม" เท่านั้น
+   * จึงตรวจค่าจริงตอนหยิบ ถ้าลดลงก็ใส่กลับด้วยค่าใหม่ (O(U log U) แทน O(U²) ของรุ่นเดิม)
+   * ทุก 64 รอบตรวจเวลา (deadline + 500ms) — หมดเวลา: ถอดหน่วยที่ยังชนทั้งหมดทีเดียว
+   */
   function extractConflicts() {
-    while (hardTot > fixedHard) {
-      let worst = -1, wh = 0;
-      for (let i = 0; i < nMov; i++) {
-        const u = mov[i];
-        if (uPos[u] < 0) continue;
-        const h = unitHard(u);
-        if (h > wh || (h === wh && h > 0 && uLen[u] > uLen[worst])) { wh = h; worst = u; }
+    const hk = [], hu = [];   // heap: คีย์ h และหน่วย u (ขนานกัน)
+    const better = (i, j) => hk[i] > hk[j] || (hk[i] === hk[j] && (uLen[hu[i]] > uLen[hu[j]] || (uLen[hu[i]] === uLen[hu[j]] && hu[i] < hu[j])));
+    const swap = (i, j) => { let x = hk[i]; hk[i] = hk[j]; hk[j] = x; x = hu[i]; hu[i] = hu[j]; hu[j] = x; };
+    const push = (h, u) => {
+      hk.push(h); hu.push(u);
+      for (let i = hk.length - 1; i > 0;) { const p = (i - 1) >> 1; if (!better(i, p)) break; swap(i, p); i = p; }
+    };
+    const pop = () => {
+      const n = hk.length - 1;
+      swap(0, n); hk.pop(); hu.pop();
+      for (let i = 0; ;) {
+        const l = 2 * i + 1, r = l + 1;
+        let m = i;
+        if (l < n && better(l, m)) m = l;
+        if (r < n && better(r, m)) m = r;
+        if (m === i) break;
+        swap(i, m); i = m;
       }
-      if (worst < 0) break;
-      remove(worst);
-      unplacedUnits.push(worst);
+    };
+    for (let i = 0; i < nMov; i++) {
+      const u = mov[i];
+      if (uPos[u] < 0) continue;
+      const h = unitHard(u);
+      if (h > 0) push(h, u);
+    }
+    let rounds = 0;
+    while (hardTot > fixedHard && hk.length) {
+      if ((++rounds & 63) === 0 && outOfTime(deadline + 500)) {
+        const rest = [];
+        for (let i = 0; i < nMov; i++) { const u = mov[i]; if (uPos[u] >= 0 && unitHard(u) > 0) rest.push(u); }
+        for (const u of rest) { remove(u); unplacedUnits.push(u); }
+        break;
+      }
+      const h0 = hk[0], u = hu[0];
+      pop();
+      if (uPos[u] < 0) continue;
+      const h = unitHard(u);
+      if (h !== h0) { if (h > 0) push(h, u); continue; }
+      remove(u);
+      unplacedUnits.push(u);
     }
   }
   function reinsert() {
     const left = [];
-    // พยายามใส่หน่วยยาว/โดเมนแคบก่อน
+    // พยายามใส่หน่วยยาว/โดเมนแคบก่อน · ทุก 32 หน่วยตรวจเวลา (deadline + 1500ms) หมดเวลา = ที่เหลือค้าง
     unplacedUnits.sort((x, y) => uLen[y] - uLen[x] || domSize(x) - domSize(y) || x - y);
-    for (const u of unplacedUnits) {
+    for (let i = 0; i < unplacedUnits.length; i++) {
+      const u = unplacedUnits[i];
+      if ((i & 31) === 31 && outOfTime(deadline + 1500)) { for (let j = i; j < unplacedUnits.length; j++) left.push(unplacedUnits[j]); break; }
       let best = Infinity, bestSlot = -1;
       for (let j = domStart[u]; j < domStart[u + 1]; j++) {
         const slot = domList[j];
@@ -1067,22 +1255,23 @@ export function solve(input, options = {}) {
   const hardLimitAt = t0 + timeLimit * 0.75;   // เก็บเวลาไว้สำหรับถอดชน/ขัดเกลา soft
   const maxRestarts = provablyInfeasible ? 1 : Infinity;
   if (nMov > 0) {
+    if (onPhase) { try { onPhase({ phase, ms: Math.round(now() - t0) }); } catch (e) { /* เหมือน onProgress */ } }
     report(0, true);
     for (let attempt = 0; attempt < maxRestarts; attempt++) {
       if (attempt > 0) { restarts++; resetState(); }
-      phase = 'greedy';
+      setPhase('greedy');
       greedy(attempt === 0 ? 0 : 600 + 200 * Math.min(attempt, 10));
       bestHardSeen = Math.min(bestHardSeen, hardTot - fixedHard);
-      phase = 'hard';
+      setPhase('hard');
       const key = hardPhase(hardLimitAt);
       if (key < globalBestKey) { globalBestKey = key; globalBest.set(runBest); }
       if (globalBestKey < W_HARD * (fixedHard + 1)) break;   // ไม่ชนแล้ว
       if (now() >= hardLimitAt || iter >= maxIter) break;
     }
     restore(globalBest);
-    if (hardTot > fixedHard) { phase = 'repair'; extractConflicts(); reinsert(); }
+    if (hardTot > fixedHard) { setPhase('repair'); extractConflicts(); reinsert(); }
     bestHardSeen = hardTot - fixedHard;
-    phase = 'soft';
+    setPhase('soft');
     softPhase(deadline);
     if (unplacedUnits.length) reinsert();
   }
@@ -1146,8 +1335,9 @@ export function solve(input, options = {}) {
     .map((e) => ({ assignmentId: M.asgs[e.a].id, remaining: e.periods, reason: e.why.reason, code: e.why.code, params: e.why.params }));
 
   const conflicts = validate(input, placements);
-  const sc = score(input, placements);
+  const sc = score(input, placements, opt.weights);
   const ms = now() - t0;
+  finalPlaced = placements.length;
   report(1, true);
   return {
     placements,
@@ -1155,7 +1345,7 @@ export function solve(input, options = {}) {
     stats: {
       hardViolations: conflicts.length,
       softScore: sc.softScore,
-      soft: { sameDay: sc.sameDay, adjacentDays: sc.adjacentDays, teacherGaps: sc.teacherGaps },
+      soft: { sameDay: sc.sameDay, adjacentDays: sc.adjacentDays, adjacentDaysRaw: sc.adjacentDaysRaw, teacherGaps: sc.teacherGaps, morningCore: sc.morningCore, classGaps: sc.classGaps },
       ms: Math.round(ms * 10) / 10,
       iterations: iter,
       restarts,

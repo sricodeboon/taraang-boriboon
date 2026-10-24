@@ -466,3 +466,12 @@ export const EXAMPLES = {
   subjects: 'รหัส\tชื่อวิชา\tคาบ\nท21101\tภาษาไทย 1\t3\nค21101\tคณิตศาสตร์ 1\t3\nส21101\tสังคมศึกษา 1\t3',
   workload: 'ครู\tวิชา\tห้อง\tคาบ\nครูสมชาย\tค21101\tม.1 ทุกห้อง\t3\nนางสาวสมศรี รักเรียน\tภาษาไทย 1\tม.1/1-2\t3',
 };
+
+/**
+ * เปิดกล่องวางรายชื่อในแอป (teachers | subjects | workload) — UI อยู่ใน data.js · โหลดเมื่อเรียกเท่านั้น
+ * โมดูลนี้จึงยังเป็นฟังก์ชันล้วนใน node (tests/import.test.mjs ไม่โหลด data.js / ไม่แตะ DOM)
+ */
+export async function openPaste(kind = 'teachers') {
+  const ui = await import('./data.js');
+  return ui.openPaste(kind);
+}

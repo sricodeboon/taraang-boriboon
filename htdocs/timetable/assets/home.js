@@ -135,6 +135,68 @@ function bindStill(btn) {
   btn.addEventListener('click', () => { setStill(!isStill()); });
 }
 
+// 5) หน้าแรก (DELIGHT §3.1): ตัวเลขโรงเรียนนับขึ้น · ส่วนล่างไหลเข้าเมื่อเลื่อนถึง · ป้าย "จัดครบ 0 ชน" เด้ง + ครูบูรณ์พยักหน้า
+//    motion.js โหลดเฉพาะหน้าที่มีของพวกนี้ (หน้าแรก) ไม่เพิ่มคำขอในหน้าอื่น · ลดภาพเคลื่อนไหว/หยุดภาพเคลื่อนไหว = แสดงผลปลายทันที
+const reducedMotion = () => isStill() || !!globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+let motionP = null;
+const motion = () => (motionP ??= import('./motion.js'));
+
+function revealBelow() {
+  if (!document.querySelector('.hero') || reducedMotion() || typeof IntersectionObserver !== 'function') return;
+  const groups = [...document.querySelectorAll('.sec .feats, .how ol')].map((g) => [...g.children]);
+  groups.push(...['.sister', '.support > *'].map((q) => [...document.querySelectorAll(q)]));
+  const vh = innerHeight || 800;
+  const io = new IntersectionObserver((list) => {
+    for (const e of list) {
+      if (!e.isIntersecting) continue;
+      io.unobserve(e.target);
+      e.target.classList.add('is-in');
+    }
+  }, { threshold: 0.15, rootMargin: '100000px 0px 0px 0px' }); // ขอบบนกว้าง = ที่เลื่อนผ่านไปแล้ว (กระโดดลงท้ายหน้า/ลิงก์ #feedback) ก็แสดง ไม่ค้างซ่อน
+  for (const g of groups) {
+    let i = 0;
+    for (const el of g) {
+      // ซ่อนเฉพาะสิ่งที่ยังอยู่ใต้จอ (สิ่งที่เห็นอยู่แล้วไม่กะพริบ) · ลำดับ --i ไล่ทีละใบในกลุ่มเดียวกัน
+      if (el.classList.contains('reveal') || el.getBoundingClientRect().top < vh * 0.92) continue;
+      el.style.setProperty('--i', String(i++));
+      el.classList.add('reveal');
+      el.addEventListener('animationend', (ev) => { if (ev.target === el) el.classList.remove('reveal', 'is-in'); }, { once: false });
+      io.observe(el);
+    }
+  }
+  // พิมพ์หน้า / กดหยุดภาพเคลื่อนไหวกลางทาง → แสดงทุกอย่างทันที
+  const showAll = () => document.querySelectorAll('.reveal').forEach((el) => { io.unobserve(el); el.classList.remove('reveal', 'is-in'); });
+  addEventListener('beforeprint', showAll);
+  document.addEventListener('tt:still', (e) => { if (e.detail?.on) showAll(); });
+}
+
+function heroMotion() {
+  const stat = document.querySelector('.stat b[data-count]');
+  const badge = document.querySelector('.board-h span');
+  if (!stat && !badge) return;
+  const n = Number(stat?.dataset.count) || 0;
+  motion().then((m) => {
+    if (stat && n > 1 && !reducedMotion()) {
+      const fmt = new Intl.NumberFormat('th-TH');
+      const go = () => m.countUp(stat, n, { dur: 900, from: 0, fmt: (v) => fmt.format(v) });
+      if (typeof IntersectionObserver !== 'function') go();
+      else {
+        const io = new IntersectionObserver((l) => { if (l.some((e) => e.isIntersecting)) { io.disconnect(); go(); } });
+        io.observe(stat);
+      }
+    }
+    // ช่องตารางในการ์ดลงครบ (ช่องสุดท้ายเล่นจบ) → ป้ายเด้ง 1 ครั้ง + ครูบูรณ์พยักหน้า
+    const cells = document.querySelectorAll('.board .cell');
+    const last = cells[cells.length - 1];
+    const anims = last?.getAnimations?.() || [];
+    Promise.all(anims.map((a) => a.finished)).then(() => {
+      m.pop(badge);
+      const boon = document.querySelector('.hero-art .boon');
+      if (boon) m.nod(boon);
+    }, () => {});
+  }, () => { /* โหลด motion.js ไม่ได้ = ตัวเลขจริงแสดงอยู่แล้ว */ });
+}
+
 /** ผูกทุกอย่างใน root (ค่าเริ่มต้นทั้งหน้า) · เรียกซ้ำได้หลังวาง markup ใหม่ */
 export function init(root = document) {
   root.querySelectorAll('[data-copy]').forEach(bindCopy);
@@ -147,5 +209,7 @@ export function init(root = document) {
 if (!window.__ttHome) {
   window.__ttHome = true;
   addEventListener('hashchange', openFromHash);
+  revealBelow();
+  heroMotion();
 }
 init();
