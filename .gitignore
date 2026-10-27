@@ -20,3 +20,9 @@ htdocs/kilasi/
 
 # คลังบริบูรณ์ ระบบทะเบียนครุภัณฑ์ มี repo แยก (โฟลเดอร์นี้เป็น git repo ของตัวเอง)
 htdocs/khlang/
+
+# จักรวาลบริบูรณ์ ระบบเรียน ป.6 ติว O-NET มี repo แยก (โฟลเดอร์นี้เป็น git repo ของตัวเอง)
+htdocs/chakrawan/
+# config จริงของจักรวาลบริบูรณ์ (มี secret) — ห้ามขึ้น git
+chakrawan-config*.php
+migrate-chakrawan/

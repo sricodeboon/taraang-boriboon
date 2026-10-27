@@ -3,6 +3,11 @@
 // ทำตัวเหมือน Apache บนโฮสต์ — ไฟล์ที่ไม่มีอยู่ตอบ 404 จริง (php -S ปกติจะส่ง index.php แทน)
 $root = __DIR__ . '/htdocs';
 $path = urldecode(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?? '/');
+// แอปที่ใช้ URL สะอาด (front controller) มี router ของตัวเองที่ <แอป>/tests/router.php (เช่น chakrawan) → ส่งต่อทั้งโฟลเดอร์
+// แอปอื่นที่ไม่มีไฟล์นี้ทำงานเหมือนเดิมทุกอย่าง
+if (preg_match('#^/([a-z0-9_-]+)(/|$)#', $path, $m) && is_file($root . '/' . $m[1] . '/tests/router.php')) {
+    return require $root . '/' . $m[1] . '/tests/router.php';
+}
 $file = realpath($root . $path);
 if ($file !== false && str_starts_with($file, $root)) {
     if (is_file($file)) {

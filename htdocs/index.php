@@ -159,6 +159,11 @@ $assetVersion = (string) @filemtime(__DIR__ . '/assets/mind.js');
       <div class="work" id="work">
         <h3>ผลงาน<span>ตัวอย่าง</span></h3>
         <ul class="work-list">
+          <li><a class="work-card" href="https://chakrawan.infinityfreeapp.com/" target="_blank" rel="noopener">
+            <span class="work-top"><img src="assets/chakrawan-icon-192.png" alt="" width="44" height="44"><i>ใหม่ · ป.6</i></span>
+            <b>จักรวาลบริบูรณ์</b>
+            <span>แอปฝึกติวสอบ O-NET สำหรับนักเรียนชั้นประถมศึกษาปีที่ 6 เท่านั้น เปิดวิชาภาษาไทยแล้ว วิชาอื่นตามมาเร็ว ๆ นี้ เรียนครบทุกตัวชี้วัด คลิปการสอน ใบความรู้ แบบทดสอบท้ายบท ทบทวนได้บนมือถือ ครูดูผลรายคนได้ทันที <strong>ใช้ฟรี รับจำนวนจำกัดไม่เกิน 50 โรงเรียน</strong></span>
+          </a></li>
           <li><a class="work-card" href="timetable/">
             <span class="work-top"><img src="timetable/assets/brand/taraang-app-icon-192.png" alt="" width="44" height="44"><i>/timetable</i></span>
             <b>ตารางบริบูรณ์</b>
