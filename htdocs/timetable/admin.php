@@ -23,6 +23,7 @@ $t0 = microtime(true);
 $sum = admin_summary();
 $list = admin_rows($q, $prio, $all, $page);
 $geo = admin_geo();
+$khlang = admin_khlang();
 $fbNew = feedback_new_count();
 $ms = (int) round((microtime(true) - $t0) * 1000);
 
@@ -184,6 +185,20 @@ page_head('ผู้ดูแลระบบ · ตารางบริบู�
     <?php endif; ?>
   </aside>
   </div>
+
+  <section aria-labelledby="h-khlang" class="panel" style="margin-top:16px">
+    <div class="panel-h"><h2 id="h-khlang">คลังบริบูรณ์</h2><span class="muted"><?= number_format(count($khlang['rows'])) ?> โรงเรียนจริง · ทดลอง/แอดมิน <?= number_format($khlang['other']) ?> โรงเรียน</span></div>
+    <?php if (!$khlang['rows']): ?><p class="empty">ยังไม่มีโรงเรียนจริงลงทะเบียนครุภัณฑ์</p><?php else: ?>
+    <div style="overflow-x:auto">
+      <table class="table adm-table">
+        <thead><tr><th>โรงเรียน</th><th>อำเภอ / จังหวัด</th><th>ครุภัณฑ์</th><th>ยืม/เบิกค้าง</th><th>แก้ไขล่าสุด</th></tr></thead>
+        <tbody><?php foreach ($khlang['rows'] as $k): ?>
+          <tr><td><?= h($k['name']) ?></td><td><?= h(trim(($k['amphoe'] ?? '') . ' / ' . ($k['province'] ?? ''), ' /')) ?></td><td class="mono"><?= number_format((int) $k['items']) ?><?= (int) $k['disposed'] ? ' <span class="muted">(จำหน่ายแล้ว ' . number_format((int) $k['disposed']) . ')</span>' : '' ?></td><td class="mono"><?= number_format((int) $k['open_loans']) ?></td><td><?= h(th_ago($k['last_at'])) ?></td></tr>
+        <?php endforeach; ?></tbody>
+      </table>
+    </div>
+    <?php endif; ?>
+  </section>
 
   <p class="muted foot">อ่านอย่างเดียว · เวลาทั้งหมดเป็นเวลาไทย · ประมวลผล <?= $ms ?> ms</p>
 </main>

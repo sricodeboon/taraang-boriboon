@@ -203,6 +203,22 @@ function admin_geo(): array {
 }
 
 // ---------- ข้อเสนอแนะ (feedback.php เขียน · admin-feedback.php อ่าน) ----------
+/** โรงเรียนจริงที่ลงทะเบียนครุภัณฑ์ในคลังบริบูรณ์ (ตาราง kl_* สร้างเมื่อเปิดคลังครั้งแรก จึงอาจยังไม่มี) */
+function admin_khlang(): array {
+    [$isAdm, $admArgs] = admin_sql_is_admin();
+    try {
+        $rows = db_all("SELECT s.id, s.name, s.amphoe, s.province, COUNT(*) AS items, SUM(i.status = 'disposed') AS disposed, MAX(i.updated_at) AS last_at,
+                               (SELECT COUNT(*) FROM kl_loans l WHERE l.school_id = s.id AND l.returned_on IS NULL) AS open_loans
+                        FROM kl_items i JOIN schools s ON s.id = i.school_id
+                        WHERE s.id IN (SELECT u.school_id FROM users u WHERE u.school_id IS NOT NULL AND u.provider <> 'guest' AND NOT $isAdm)
+                        GROUP BY s.id, s.name, s.amphoe, s.province ORDER BY last_at DESC", $admArgs);
+        $all = (int) db_one('SELECT COUNT(DISTINCT school_id) AS n FROM kl_items')['n'];
+    } catch (PDOException) {
+        return ['rows' => [], 'other' => 0];
+    }
+    return ['rows' => $rows, 'other' => max(0, $all - count($rows))];
+}
+
 const FEEDBACK_KIND = ['bug' => 'ติดปัญหา', 'feature' => 'อยากได้ฟีเจอร์', 'praise' => 'ชมเชย', 'other' => 'อื่น ๆ'];
 const FEEDBACK_STATUS = ['new' => 'ใหม่', 'read' => 'อ่านแล้ว', 'replied' => 'ตอบแล้ว'];
 const FEEDBACK_PAGE_SIZE = 50;
